@@ -14,6 +14,8 @@ from datetime import datetime
 CALENDAR_FILE = "calendar.json"
 
 _calendar: list[dict] = []
+# Optional callback(row) called after every write. The timeline sets it.
+on_commit = None
 # Strong references to in-flight backend tasks. The event loop only keeps weak
 # references, so a shielded task nobody awaits anymore could be garbage collected.
 _inflight: set[asyncio.Task] = set()
@@ -58,6 +60,8 @@ def _write(day: str, caller_id: str, seq: int, mode: str) -> None:
     # A later spec adds `elif mode == "upsert":` here (replace the caller's row).
     else:
         raise ValueError(f"unknown storage mode: {mode!r}")
+    if on_commit:
+        on_commit(row)
     _show()
 
 
