@@ -20,6 +20,6 @@ Checked without API keys:
 
 Needs keys and a microphone (run these yourself):
 - [x] D. Copy `.env.example` to `.env`, fill in keys. Run `uv sync` and `uv run bot.py`, open `http://localhost:7860/client`, click Connect. The agent greets first.
-- [ ] E. Say "Book me for Friday". About `COMMIT_AT` seconds later one Friday row is printed and `calendar.json` has it. The agent confirms after about `TOTAL` seconds.
-- [ ] F. Say "Book me for Friday", wait 2 s, say "Actually, make it Saturday". The calendar ends with a Friday and a Saturday row. Expected baseline.
+- [x] E. Say "Book me for Friday". About `COMMIT_AT` seconds later one Friday row is printed and `calendar.json` has it. The agent confirms after about `TOTAL` seconds.
+- [x] F. Say "Book me for Friday", wait 2 s, say "Actually, make it Saturday". The calendar ends with a Friday and a Saturday row. Expected baseline.
 - [ ] G. Change `COMMIT_AT` and `TOTAL` in `.env`, restart, and confirm the timing changes.
