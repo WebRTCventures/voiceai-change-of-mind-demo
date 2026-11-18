@@ -1,8 +1,9 @@
 """Change-of-mind voice agent: books an appointment through one slow tool.
 
-Run:  uv run bot.py   then open http://localhost:7860/client
+Run:  uv run bot.py [--policy deaf|cancel|safe]   then open http://localhost:7860/client
 """
 
+import argparse
 import os
 
 from dotenv import load_dotenv
@@ -26,6 +27,7 @@ from pipecat.services.deepgram.tts import DeepgramTTSService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.turns.user_mute import FunctionCallUserMuteStrategy
 from pipecat.workers.runner import WorkerRunner
 
 import calendar_backend
@@ -38,27 +40,52 @@ Keep replies to one short sentence."""
 
 GREETING = "Hi, I can book your appointment. Which day works for you?"
 
-# --- PLUG-IN POINT (later spec): --policy / --turn flags ----------------------
-# A small mapping from flag value to settings will go here (e.g. tool options,
-# user mute strategies, turn stop strategy). One pipeline, no forks. Note: the
-# runner's main() uses a strict argparse, so custom flags need handling before
-# main() is called.
+# --- Interruption policies ----------------------------------------------------
+# One pipeline. A policy is only a user mute setting plus a backend storage mode.
+#   deaf:   user input is muted while a tool runs, so the correction is never heard
+#   cancel: Pipecat default. The interruption cancels the tool, but the backend
+#           write is shielded and still lands, and the storage just appends
+#   safe:   same as cancel, but the backend keeps one row per caller and rejects
+#           a write from an older turn (seq guard)
+POLICIES = {
+    # name      user mute strategies (classes, one instance per session)   storage
+    "deaf":   {"mute": [FunctionCallUserMuteStrategy], "storage": "append"},
+    "cancel": {"mute": [],                             "storage": "append"},
+    "safe":   {"mute": [],                             "storage": "upsert"},
+}
+DEFAULT_POLICY = "cancel"
+
+
+def describe(policy: str) -> str:
+    cfg = POLICIES[policy]
+    mute = ", ".join(c.__name__ for c in cfg["mute"]) or "none"
+    return f"policy={policy}  (user mute: {mute}; storage: {cfg['storage']})"
+
+
+def policy_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Change-of-mind voice agent")
+    parser.add_argument("--policy", choices=POLICIES, default=DEFAULT_POLICY)
+    return parser
 # ------------------------------------------------------------------------------
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     session_id = runner_args.webrtc_connection.pc_id  # SmallWebRTC connection id
+    policy = runner_args.cli_args.policy
+    storage = POLICIES[policy]["storage"]
+    print(f"\nSESSION START  {describe(policy)}", flush=True)
     user_turns = 0  # incremented when a user turn is confirmed (S0 -> S1)
 
     # Direct function: Pipecat builds the tool schema from the signature and
-    # docstring. Default tool options, so the call is cancelled on interruption.
+    # docstring. Default tool options, so the call is cancelled on interruption
+    # (every policy; deaf avoids the interruption by muting the user instead).
     async def book_appointment(params: FunctionCallParams, day: str):
         """Book an appointment on a day of the week.
 
         Args:
             day: The day of the appointment, Monday to Saturday.
         """
-        await calendar_backend.book(day, caller_id=session_id, seq=user_turns)
+        await calendar_backend.book(day, caller_id=session_id, seq=user_turns, mode=storage)
         await params.result_callback({"status": "booked", "day": day})
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
@@ -75,7 +102,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(tools=[book_appointment])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        user_params=LLMUserAggregatorParams(
+            vad_analyzer=SileroVADAnalyzer(),
+            user_mute_strategies=[m() for m in POLICIES[policy]["mute"]],
+        ),
     )
 
     @user_aggregator.event_handler("on_user_turn_stopped")
@@ -99,6 +129,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     timeline = Timeline()
     timeline.attach(user_aggregator, assistant_aggregator)
     calendar_backend.on_commit = timeline.commit
+    calendar_backend.on_reject = timeline.reject
     worker = PipelineWorker(
         pipeline, params=PipelineParams(enable_metrics=True), observers=[timeline]
     )
@@ -116,7 +147,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
-        timeline.dump(context)
+        timeline.dump(context, calendar_backend.rows_for(session_id), policy, storage)
         await runner.cancel()
 
     await runner.add_workers(worker)
@@ -135,4 +166,6 @@ async def bot(runner_args: RunnerArguments):
 if __name__ == "__main__":
     from pipecat.runner.run import main
 
-    main()
+    parser = policy_parser()
+    print(f"STARTUP  {describe(parser.parse_known_args()[0].policy)}", flush=True)
+    main(parser)  # the runner adds its own flags to our parser
