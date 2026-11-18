@@ -91,13 +91,14 @@ class Timeline(BaseObserver):
     # --- observer: frames the aggregator events do not cover -------------------
     async def on_push_frame(self, data):
         f = data.frame
-        if f.broadcast_sibling_id is not None and data.direction != FrameDirection.DOWNSTREAM:
-            return  # broadcast frames arrive twice, read the downstream copy
+        if data.direction != FrameDirection.DOWNSTREAM:
+            return  # frames are often sent both ways as separate copies, read the downstream one
         # Any other event line means the pending INTERRUPT line will not get its numbers.
         if isinstance(f, _FLUSHES):
             self._flush()
         if isinstance(f, VADUserStartedSpeakingFrame):
-            self.speech_start = self.now()
+            # The VAD confirms speech start_secs after it began, so back-date the onset.
+            self.speech_start = self.now() - f.start_secs
             self.log("VAD", "user started speaking")
         elif isinstance(f, VADUserStoppedSpeakingFrame):
             self.log("VAD", "user stopped speaking")

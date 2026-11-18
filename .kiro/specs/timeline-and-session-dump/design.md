@@ -10,7 +10,7 @@ Checked in the installed package (`.venv/lib/python3.11/site-packages/pipecat`),
 | Assistant aggregator event `on_assistant_turn_stopped(aggregator, message)`. `message.content`, `message.interrupted` | `llm_response_universal.py` ~2770, `AssistantTurnStoppedMessage` |
 | `BaseObserver.on_push_frame(data)` with `data.frame`, `data.direction`. `observe_every_push=False` delivers each frame once, at its first push | `observers/base_observer.py` |
 | Frames: `VADUserStartedSpeakingFrame`, `VADUserStoppedSpeakingFrame`, `InterruptionFrame`, `BotStartedSpeakingFrame`, `BotStoppedSpeakingFrame`, `FunctionCallsStartedFrame` (`function_calls` with `function_name`, `tool_call_id`, `arguments`), `FunctionCallResultFrame`, `FunctionCallCancelFrame` | `frames/frames.py` |
-| Interruption and cancel frames are broadcast (two frames). Read the one with `direction == DOWNSTREAM` | `llm_service.py` `_broadcast_function_call_cancelled`; same rule in Pipecat's own `SpeakingObserver` |
+| Many frames are sent in both directions as separate copies. The VAD frames carry no `broadcast_sibling_id` (`_queued_broadcast_frame`), so the first live run printed every VAD line twice. The observer ignores every non-DOWNSTREAM push | `llm_response_universal.py` `_queued_broadcast_frame`, `frame_processor.py` `broadcast_frame` |
 | `PipelineWorker(pipeline, params=..., observers=[...])` | `pipeline/worker.py` |
 | `context.get_messages()` returns the messages list (plain dicts for our messages) | `processors/aggregators/llm_context.py` |
 | Strategy objects have no friendly name. Default start strategies are `VADUserTurnStartStrategy` and `TranscriptionUserTurnStartStrategy`. Default stop strategy is `TurnAnalyzerUserTurnStopStrategy` with `LocalSmartTurnAnalyzerV3` | `turns/user_turn_strategies.py` |
@@ -45,7 +45,7 @@ So the context holds the assistant call message for Friday with a tool message `
 ### INTERRUPT line
 The latency is only known after the interruption frame, when the bot stops or the tool is cancelled. So the line is held and printed when its numbers are known, just before the BOT stopped or TOOL CANCELLED line. If the interruption happens with neither (S0, S1, S3), it prints at once without numbers. If another VAD, bot-start or tool line arrives first, the line prints with `n/a` for the missing number (for example a later spec keeps the tool running). The example in the brief shows `210ms` while the INTERRUPT and CANCELLED lines are 10 ms apart. We measure to the cancel frame, so the number is the true interval and can differ by that much from the printed times.
 
-"User speech start" is the time the VAD start frame is observed, which is about `start_secs` (0.2 s) after the voice began. It matches the VAD line on the timeline.
+"User speech start" is the VAD start frame's observed time minus its `start_secs` (0.2 s), because the VAD confirms speech that long after it began. Without the back-dating, `tool_cancel_latency` read 1 ms in the first live run, since the aggregator interrupts in the same instant as the VAD frame. The VAD line itself prints at the confirmation time.
 
 ### Backend coupling
 `calendar_backend.py` gets one module variable `on_commit = None` and two lines in `_write` that call it with the stored row. `bot.py` sets `calendar_backend.on_commit = timeline.commit`. The backend does not import the timeline.
