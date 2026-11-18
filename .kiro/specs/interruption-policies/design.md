@@ -109,6 +109,31 @@ OK: 1 booking, Friday  <- expected for deaf: the correction was muted
 
 **If it were delivered late.** This happens for speech whose transcript arrives after `user mute stopped`, for example a correction that ends just as the tool returns, because Deepgram's final transcript trails the end of speech. Then the order is: tool result Friday, `user mute stopped`, the late transcript starts a turn. The LLM may already be generating the Friday confirmation (S3), so the late turn interrupts it (`INTERRUPT` with a `yield_latency` if the bot has started speaking), and the model sees "make it Saturday" after a completed Friday booking. It calls `book_appointment(Saturday)`. With `append` storage that gives Friday and Saturday: 2 bookings, `MISMATCH`, the same row count as `cancel`. The difference from `cancel` is that the model knows Friday was booked (the tool result is `booked`, not `CANCELLED`), so it can say "I changed it to Saturday", although the Friday row remains. With the main script's timing (correction about 2 to 4 s into a 6 s tool) the correction is fully inside the mute window, so the late case does not occur. Check G tries it live.
 
+## Live result: `cancel` (check E)
+
+Pipecat 1.16.0, Deepgram, OpenAI, SmallWebRTC, run by the repo owner. Matches the table.
+
+```
+ +9.619  TOOL       book_appointment(day=Friday) started  seq=1
++11.340  VAD        user started speaking
++11.340  TURN       user turn started (VAD)
++11.341  INTERRUPT  interruption  tool_cancel_latency=202ms
++11.341  TOOL       book_appointment seq=1 CANCELLED
++12.619  BACKEND    COMMIT Friday seq=1 (tool was already cancelled)
++13.149  TURN       user turn stopped (TurnAnalyzer) "Actually, make it Saturday."
++13.997  TOOL       book_appointment(day=Saturday) started  seq=2
++16.997  BACKEND    COMMIT Saturday seq=2
++19.998  TOOL       book_appointment seq=2 result {"status": "booked", "day": "Saturday"}
++22.773  BOT        assistant turn stopped interrupted=False "Your appointment is booked for Saturday."
+MISMATCH: 2 bookings (Friday, Saturday)
+```
+
+- The interruption cancelled the tool 202 ms after the caller started speaking, 1.7 s after the tool began. The shielded Friday write still landed 1.3 s after the cancel.
+- The dump's context holds `tool id=call_ipc3... CANCELLED` for Friday, and the next LLM request (visible in the debug log) sent that same `CANCELLED` string back to the model.
+- The model then called `book_appointment(Saturday)` once and did not call Friday again. It said "Your appointment is booked for Saturday." while the calendar holds two rows. The caller hears a clean confirmation and the backend has a stray Friday booking. That is the failure this policy shows.
+- "The model believes Friday was never booked" is inferred from the `CANCELLED` content and from the model not retrying Friday. The log does not show the model's reasoning.
+- The Friday commit came before the correction's user turn stopped (+12.619 against +13.149), so the Saturday write started after Friday had already landed. With `safe` the same timing gives a replace, not a reject.
+
 ## Shortcuts
 
 | Shortcut | Production approach |
@@ -125,7 +150,7 @@ OK: 1 booking, Friday  <- expected for deaf: the correction was muted
 
 ## Verification status
 
-Live: check D (`deaf`), see the result above.
+Live: check D (`deaf`) and check E (`cancel`), see the results above.
 
 Done offline, no API keys (see `tasks.md` checks A to C):
 - Flag parsing, startup line, server start with `--host 127.0.0.1`.
@@ -133,6 +158,6 @@ Done offline, no API keys (see `tasks.md` checks A to C):
 - Backend and dump for the three policies with shortened timings and a hand-driven interruption: deaf `OK: 1 booking, Friday  <- expected for deaf`, cancel `MISMATCH: 2 bookings (Friday, Saturday)`, safe `OK: 1 booking, Saturday`, and the stale reject.
 
 Not verified:
-- A live session for `cancel` and `safe`. Their outcomes depend on the model calling `book_appointment` again with Saturday. Checks E and F in `tasks.md` need Deepgram and OpenAI keys and a microphone. `deaf` was run live (check D).
+- A live session for `safe` (check F). `deaf` (check D) and `cancel` (check E) were run live.
 - The late-delivery case in `deaf` (check G).
 - That the model "believes Friday was never booked" in `cancel`. The dump shows the recorded `CANCELLED` tool message. What the model infers from it is model-dependent (same caveat as `timeline-and-session-dump`).
