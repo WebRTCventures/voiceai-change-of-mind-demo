@@ -18,26 +18,25 @@ Done without API keys:
 - [x] B. Real user aggregator with the strategies from `bot.turn_strategies`, fed synthetic frames: `fast` closes the turn `TURN_FAST_TIMEOUT` after the VAD stop line and prints `(SpeechTimeout)`; `smart` builds `TurnAnalyzerUserTurnStopStrategy` (`turn_strategies("smart")` is `None`). Output in `design.md`
 - [x] C. The default Smart Turn model loads from the installed package (`.../smart_turn/data/smart-turn-v3.2-cpu.onnx`), no download
 
-Needs keys and a microphone. **Not run: the agent session that wrote this spec had no `DEEPGRAM_API_KEY`, `OPENAI_API_KEY` or microphone.** Run these yourself, one session per attempt, with the S0 script: "Book me for Friday, ummm...", pause about 1 s, "actually Saturday". Use `--policy cancel` (default) so the failure is visible in the dump.
+Needs keys and a microphone. **Not run: the agent session that wrote this spec had no `DEEPGRAM_API_KEY`, `OPENAI_API_KEY` or microphone.** Run these yourself with the S0 script: "Book me for Friday, ummm...", pause about 1 s, "actually Saturday". Use `--policy cancel` (default) so the failure is visible in the dump.
 
-- [ ] D. `--turn fast`, 10 attempts. A hit is: `TURN user turn stopped (SpeechTimeout)` before the correction's `VAD user started speaking`, then `TOOL book_appointment(day=Friday) started` before that same `VAD` line. Record the count in the table below
-- [ ] E. `--turn smart`, 10 attempts. A hit is: no `TURN user turn stopped` between the first `VAD user stopped speaking` and the correction's `VAD user started speaking`, and one `book_appointment(day=Saturday)` only. Record the count below
-- [ ] F. Tune `TURN_FAST_TIMEOUT` (start at 0.2) until D reproduces reliably. Record the final value below and set it in `.env.example`
-- [ ] G. Screenshot the `smart` and `fast` timelines for the post
+- [ ] D. `--turn fast`, tune `TURN_FAST_TIMEOUT` (start at 0.2) until the order below shows on 3 consecutive runs:
+  ```
+  VAD   user stopped speaking
+  TURN  user turn stopped (SpeechTimeout) "..."
+  TOOL  book_appointment(day=Friday) started
+  VAD   user started speaking      <- the correction
+  ```
+  After each miss, read the gap between `TURN user turn stopped` and `TOOL ... started`. If it is about 0.7 to 1.1 s, the LLM is the limit and the timeout cannot fix it: lengthen the pause (1.5 s or more) or change `OPENAI_MODEL`, and write that down. If the turn closes late, lower the timeout (no effect below about 0.15 s). Record the final value and set it in `.env.example`
+- [ ] E. `--turn smart`, 1 or 2 runs: no `TURN user turn stopped` between the first `VAD user stopped speaking` and the correction's `VAD user started speaking`, and one `book_appointment(day=Saturday)` only. Dump: `OK: 1 booking, Saturday`
+- [ ] F. Screenshot the `smart` and `fast` timelines for the post
 
 ## Results (to be filled in from the live runs)
 
 Final `TURN_FAST_TIMEOUT`: _not tuned yet, shipped default 0.2 s_
 
-| Mode | `TURN_FAST_TIMEOUT` | Attempts | Hits | Misses and why |
-|---|---|---|---|---|
-| fast | _ | 10 | _ | _ |
-| smart | n/a | 10 | _ | _ |
-
-Tuning log (one line per value tried: value, hits out of 10, the gap between `VAD user stopped speaking` and `TURN user turn stopped`, and the gap to `TOOL ... started`):
+Tuning log, one line per run: timeout, whether the order was right, gap from `VAD user stopped speaking` to `TURN user turn stopped`, gap from `TURN user turn stopped` to `TOOL ... started`.
 
 - _empty_
 
-Notes for the live runs:
-- The expected limit on `fast` is LLM latency, not the timeout. The turn closes about 0.4 to 0.55 s after the caller stops, then the LLM needs about 0.7 to 1.1 s to emit the tool call, so with a 1 s pause the correction can start in S1 and no Friday call happens (see `design.md`, "Tuning and the race window"). Record those misses as such. If most misses are this, lengthening the pause is a script change, not a code change, and should be written down here.
-- Check the transcript on the `TURN user turn stopped` line. If it includes "ummm", the filler-word assumption in `design.md` is wrong. Update that paragraph.
+Check the transcript on the `TURN user turn stopped` line. If it includes "ummm", the filler-word assumption in `design.md` is wrong. Update that paragraph.

@@ -39,7 +39,7 @@ Acceptance criteria:
 With the S0 script:
 - `--turn fast`: the timeline shows `TURN user turn stopped (SpeechTimeout)` during the pause, and `TOOL book_appointment(day=Friday) started` before the correction's `VAD user started speaking`.
 - `--turn smart`: the turn usually stays open through the pause, and a single `book_appointment(day=Saturday)` runs.
-- `TURN_FAST_TIMEOUT` is tuned so the fast case reproduces reliably. The final value and the hit rate of each mode over 10 attempts are in `tasks.md`.
+- `TURN_FAST_TIMEOUT` is tuned until the `fast` case gives the order above on 3 consecutive runs. The final value and the tuning log are in `tasks.md`.
 
 ### 6. Constraints
 1. Principles from the brief: simplicity over production readiness, no automated tests, no pipeline forks, readable output.
