@@ -210,5 +210,5 @@ Done offline, no API keys (see `tasks.md` checks A to C):
 
 Not verified:
 - A live stale reject. Every live run shows Friday landing before Saturday starts. The reject is covered only by check C (hand-driven backend).
-- The late-delivery case in `deaf` (check G).
+- The late-delivery case in `deaf` (check G, skipped). The description under "If it were delivered late" comes from reading the source, not from a run.
 - That the model "believes Friday was never booked" in `cancel`. The dump shows the recorded `CANCELLED` tool message. What the model infers from it is model-dependent (same caveat as `timeline-and-session-dump`).
