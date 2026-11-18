@@ -64,6 +64,7 @@ class Timeline(BaseObserver):
         @user.event_handler("on_user_turn_stopped")
         async def _(agg, strategy, message):
             self.turns += 1
+            self.speech_start = None  # the next interruption must not reuse this turn's VAD onset
             self.log("TURN", f'user turn stopped ({_name(strategy)}) "{message.content}"')
 
         @user.event_handler("on_user_mute_started")
@@ -105,7 +106,7 @@ class Timeline(BaseObserver):
         elif isinstance(f, InterruptionFrame):
             self._flush()
             waits = {"tool_cancel_latency": bool(self.running), "yield_latency": self.bot_speaking}
-            self.pending = {k: None for k, on in waits.items() if on and self.speech_start is not None}
+            self.pending = {k: None for k, on in waits.items() if on}
             if not self.pending:
                 self._flush()
         elif isinstance(f, BotStartedSpeakingFrame):
@@ -134,14 +135,16 @@ class Timeline(BaseObserver):
     def _resolve(self, key: str):
         """Fill in one latency (ms since user speech start); print once all are known."""
         if self.pending and self.pending.get(key, 0) is None:
-            self.pending[key] = (self.now() - self.speech_start) * 1000
+            # n/a: the turn was started by a transcript, VAD never saw this speech
+            ms = None if self.speech_start is None else (self.now() - self.speech_start) * 1000
+            self.pending[key] = "n/a" if ms is None else f"{ms:.0f}ms"
             if None not in self.pending.values():
                 self._flush()
 
     def _flush(self):
         if self.pending is None:
             return
-        nums = "".join(f"  {k}={'n/a' if v is None else f'{v:.0f}ms'}" for k, v in self.pending.items())
+        nums = "".join(f"  {k}={v or 'n/a'}" for k, v in self.pending.items())
         self.pending = None
         self.log("INTERRUPT", f"interruption{nums}")
 

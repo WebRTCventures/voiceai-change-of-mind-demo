@@ -47,6 +47,8 @@ The latency is only known after the interruption frame, when the bot stops or th
 
 "User speech start" is the VAD start frame's observed time minus its `start_secs` (0.2 s), because the VAD confirms speech that long after it began. Without the back-dating, `tool_cancel_latency` read 1 ms in the first live run, since the aggregator interrupts in the same instant as the VAD frame. The VAD line itself prints at the confirmation time.
 
+The onset is cleared when a user turn stops. The second live run had a turn started by `TranscriptionUserTurnStartStrategy` with no VAD event for that speech, and the old code reused the previous utterance's onset (`tool_cancel_latency=7089ms`). Now the INTERRUPT line prints `n/a` for that case, since there is no onset to measure from.
+
 ### Backend coupling
 `calendar_backend.py` gets one module variable `on_commit = None` and two lines in `_write` that call it with the stored row. `bot.py` sets `calendar_backend.on_commit = timeline.commit`. The backend does not import the timeline.
 
