@@ -18,7 +18,7 @@ Done without API keys:
 - [x] C. Backend and dump driven by hand in the three policies, with shortened timings: `deaf` gives `OK ... expected for deaf`, `cancel` gives `MISMATCH: 2 bookings (Friday, Saturday)`, `safe` gives `OK: 1 booking, Saturday` with `(replaced Friday seq=1)`. A Saturday write followed by a Friday write is rejected as stale
 
 Needs keys and a microphone (run these yourself, one session per policy, main script: "Book me for Friday", then about 2 s later "Actually, wait, make it Saturday"):
-- [ ] D. `--policy deaf`: `MUTE user mute started`, then `MUTE transcript while muted "..."`, no INTERRUPT line, `user mute stopped` when the tool returns, no `TURN` line for the correction, the agent confirms Friday. Dump: `OK: 1 booking, Friday  <- expected for deaf`. Fill in "Live result" in `design.md`
+- [x] D. `--policy deaf`: `MUTE user mute started`, then `MUTE transcript while muted "..."`, no INTERRUPT line, `user mute stopped` when the tool returns, no `TURN` line for the correction, the agent confirms Friday. Dump: `OK: 1 booking, Friday  <- expected for deaf`. Result recorded in `design.md`
 - [ ] E. `--policy cancel` (or no flag): INTERRUPT, TOOL CANCELLED, Friday COMMIT `(tool was already cancelled)`, Saturday COMMIT. Dump: 2 rows, `CANCELLED` in the context, `MISMATCH`
 - [ ] F. `--policy safe`: Friday COMMIT, then Saturday COMMIT `(replaced Friday seq=1)`. Dump: 1 row, Saturday, `OK: 1 booking, Saturday`
 - [ ] G. `--policy deaf`, speak the correction so it ends right after the tool returns (about 5 s into the tool). If a `TURN` line follows `user mute stopped`, the late-delivery case happens; note the outcome in `design.md`

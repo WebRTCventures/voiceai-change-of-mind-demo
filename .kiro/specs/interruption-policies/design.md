@@ -63,7 +63,7 @@ When does the guard fire? With one tool, `COMMIT_AT` and `TOTAL` apply to both c
 
 ## Question: is muted speech dropped or delivered after unmute?
 
-**Answer: dropped, when it arrives while the user is muted.** Pipecat does not buffer it. A transcript that arrives after the mute ends is a normal transcript and is delivered.
+**Answer: dropped, when it arrives while the user is muted (confirmed in a live run, below).** Pipecat does not buffer it. A transcript that arrives after the mute ends is a normal transcript and is delivered.
 
 Evidence:
 - Source: `_maybe_mute_frame` returns before the frame is handled, so a muted `TranscriptionFrame` is never aggregated and never starts a user turn. The same holds for audio, so the VAD, which runs inside the aggregator, sees no speech either. In deaf mode the timeline shows no `VAD`, `TURN` or `INTERRUPT` line for the correction.
@@ -88,7 +88,24 @@ Evidence:
 
   With mute, the transcript is seen on the timeline, produces no turn, and the context has no user message after the tool result. Without mute, the same transcript starts a turn and interrupts.
 
-**Live result (check D):** not run yet. Fill in from a real session: whether a `TURN` line appears between `user mute stopped` and the end of the session.
+**Live result (check D), Pipecat 1.16.0, Deepgram, OpenAI, SmallWebRTC, run by the repo owner:** dropped, confirmed.
+
+```
+ +13.417  TOOL       book_appointment(day=Friday) started  seq=1
+ +13.418  MUTE       user mute started
+ +16.419  BACKEND    COMMIT Friday seq=1
+ +16.510  MUTE       transcript while muted "Actually, make it Saturday."
+ +19.419  TOOL       book_appointment seq=1 result {"status": "booked", "day": "Friday"}
+ +19.420  MUTE       user mute stopped
+ +20.533  BOT        bot started speaking
+ +22.500  BOT        assistant turn stopped interrupted=False "Your appointment is booked for Friday."
+OK: 1 booking, Friday  <- expected for deaf: the correction was muted
+```
+
+- The final transcript arrived 3.1 s into the mute and 2.9 s before unmute. No `VAD`, `TURN` or `INTERRUPT` line followed it, not during the mute and not after `user mute stopped`. The context holds no user message with the correction (dump: 6 messages, the last user message is "Book me for Friday.").
+- The model's reply after the tool result was "Your appointment is booked for Friday.", so the caller heard Friday confirmed after asking for Saturday.
+- Mute started 1 ms after the `TOOL ... started` line and stopped 1 ms after the result, as the source says.
+- The late-delivery case (below) did not occur because the correction was well inside the window. Check G, which times speech to end right at the unmute, is still open.
 
 **If it were delivered late.** This happens for speech whose transcript arrives after `user mute stopped`, for example a correction that ends just as the tool returns, because Deepgram's final transcript trails the end of speech. Then the order is: tool result Friday, `user mute stopped`, the late transcript starts a turn. The LLM may already be generating the Friday confirmation (S3), so the late turn interrupts it (`INTERRUPT` with a `yield_latency` if the bot has started speaking), and the model sees "make it Saturday" after a completed Friday booking. It calls `book_appointment(Saturday)`. With `append` storage that gives Friday and Saturday: 2 bookings, `MISMATCH`, the same row count as `cancel`. The difference from `cancel` is that the model knows Friday was booked (the tool result is `booked`, not `CANCELLED`), so it can say "I changed it to Saturday", although the Friday row remains. With the main script's timing (correction about 2 to 4 s into a 6 s tool) the correction is fully inside the mute window, so the late case does not occur. Check G tries it live.
 
@@ -108,11 +125,14 @@ Evidence:
 
 ## Verification status
 
+Live: check D (`deaf`), see the result above.
+
 Done offline, no API keys (see `tasks.md` checks A to C):
 - Flag parsing, startup line, server start with `--host 127.0.0.1`.
 - Real user aggregator with the mute strategy (output above).
 - Backend and dump for the three policies with shortened timings and a hand-driven interruption: deaf `OK: 1 booking, Friday  <- expected for deaf`, cancel `MISMATCH: 2 bookings (Friday, Saturday)`, safe `OK: 1 booking, Saturday`, and the stale reject.
 
 Not verified:
-- A live session for any policy. The brief's table outcomes depend on the model calling `book_appointment` again with Saturday (cancel, safe) and on the correction landing inside the mute window (deaf). Checks D to G in `tasks.md` need Deepgram and OpenAI keys and a microphone.
+- A live session for `cancel` and `safe`. Their outcomes depend on the model calling `book_appointment` again with Saturday. Checks E and F in `tasks.md` need Deepgram and OpenAI keys and a microphone. `deaf` was run live (check D).
+- The late-delivery case in `deaf` (check G).
 - That the model "believes Friday was never booked" in `cancel`. The dump shows the recorded `CANCELLED` tool message. What the model infers from it is model-dependent (same caveat as `timeline-and-session-dump`).
