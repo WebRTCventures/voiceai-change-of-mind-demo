@@ -76,6 +76,14 @@ The TOOL line shows `seq=<number of stopped user turns>`. `Timeline` keeps its o
 | Dump runs only on client disconnect. A commit that lands after the dump is missing from it, but still printed live | Flush on session end after in-flight backend work settles |
 | Strategy names derived from class names | Give strategies explicit labels |
 
-## Not verified
+## Verification status
 
-No live run: the sandbox has no Deepgram or OpenAI keys or microphone. Checked here: `timeline.py` imports and attaches to real `LLMContextAggregatorPair` and `PipelineWorker`, and a script that feeds real Pipecat frame objects to the observer in the order of the double-booking scenario printed the expected lines, the held INTERRUPT line (`tool_cancel_latency`), a late commit flagged as after the cancel, an S4 `yield_latency`, and a `MISMATCH` verdict. The "Done when" run with the real script remains a manual check (tasks D to F).
+Live runs on Pipecat 1.16.0 (Deepgram, OpenAI, SmallWebRTC), by the repo owner:
+- Double booking (S2): the timeline order, `tool_cancel_latency=201ms`, the Friday commit flagged `(tool was already cancelled)`, a `CANCELLED` context entry and `MISMATCH: 2 bookings (Friday, Saturday)`.
+- Barge-in on the confirmation (S4): `yield_latency=202ms`, `interrupted=True` on the BOT line, and `OK: 1 booking, Friday`.
+- Two bugs found by the live runs are fixed: duplicate VAD lines, and a stale speech onset (see above).
+
+Not verified:
+- The brief's claim that only the words actually spoken are committed for an interrupted assistant turn. In the S4 run the committed text was the whole sentence, "Your appointment is booked for Friday.", and the interruption came about 1.5 s after the bot started speaking, so the sentence may have been nearly finished. To test it, interrupt within the first second of a longer reply.
+- `yield_latency` ends at `BotStoppedSpeakingFrame` on the server. Audio already buffered in the browser may play a little longer.
+- The S0 script ("Friday, ummm...") was not run.
