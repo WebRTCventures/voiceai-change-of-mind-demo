@@ -29,6 +29,7 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.workers.runner import WorkerRunner
 
 import calendar_backend
+from timeline import Timeline
 
 SYSTEM_PROMPT = """You book appointments for a clinic. Appointments are by day only (Monday to Saturday).
 As soon as the caller names a day, call book_appointment with that day. Do not ask for confirmation.
@@ -94,11 +95,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ]
     )
 
-    # --- PLUG-IN POINT (later spec): timeline -----------------------------------
-    # Pass timeline observers to PipelineWorker(observers=[...]) and register the
-    # timeline's aggregator event handlers here. Dump the timeline on disconnect.
-    # -----------------------------------------------------------------------------
-    worker = PipelineWorker(pipeline, params=PipelineParams(enable_metrics=True))
+    # Timeline: aggregator events plus a small observer; the backend reports commits.
+    timeline = Timeline()
+    timeline.attach(user_aggregator, assistant_aggregator)
+    calendar_backend.on_commit = timeline.commit
+    worker = PipelineWorker(
+        pipeline, params=PipelineParams(enable_metrics=True), observers=[timeline]
+    )
 
     # The agent greets first, once the browser client is ready.
     @worker.rtvi.event_handler("on_client_ready")
@@ -113,6 +116,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
+        timeline.dump(context)
         await runner.cancel()
 
     await runner.add_workers(worker)
