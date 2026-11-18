@@ -18,7 +18,7 @@ Done without API keys:
 - [x] B. Frames fed to the observer in the double-booking order print the expected lines and a `MISMATCH` verdict
 
 Needs keys and a microphone (run these yourself):
-- [ ] C. `uv run bot.py`, connect. After the greeting the timeline shows VAD, TURN and BOT lines
-- [ ] D. Double booking: "Book me for Friday", wait 2 s, "Actually, wait, make it Saturday". In order: Friday TOOL started, VAD user started speaking, INTERRUPT with `tool_cancel_latency`, TOOL CANCELLED, BACKEND COMMIT Friday with `(tool was already cancelled)`, a second TOOL started for Saturday, its COMMIT
-- [ ] E. Disconnect. The dump shows two calendar rows, the Friday call with a recorded `CANCELLED` result, and a `MISMATCH` verdict
+- [x] C. `uv run bot.py`, connect. After the greeting the timeline shows VAD, TURN and BOT lines
+- [x] D. Double booking: "Book me for Friday", wait 2 s, "Actually, wait, make it Saturday". In order: Friday TOOL started, VAD user started speaking, INTERRUPT with `tool_cancel_latency`, TOOL CANCELLED, BACKEND COMMIT Friday with `(tool was already cancelled)`, a second TOOL started for Saturday, its COMMIT
+- [x] E. (same session as D) Disconnect. The dump shows two calendar rows, the Friday call with a recorded `CANCELLED` result, and a `MISMATCH` verdict
 - [ ] F. Let a booking finish, then interrupt "You're all set for...". The INTERRUPT line shows `yield_latency`, and the BOT line shows `interrupted=True` with the words that were spoken
