@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
     InterruptionFrame,
+    TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -47,7 +48,7 @@ class Timeline(BaseObserver):
         self.cancelled_seqs = set()
         self.last_day = None  # day of the last book_appointment call the model made
         self.pending = None  # INTERRUPT line waiting for its latency numbers
-        self.commits = []  # rows reported by the backend
+        self.muted = False  # user mute is on (deaf policy)
 
     def now(self) -> float:
         return time.monotonic() - self.t0
@@ -69,10 +70,12 @@ class Timeline(BaseObserver):
 
         @user.event_handler("on_user_mute_started")
         async def _(agg):
+            self.muted = True
             self.log("MUTE", "user mute started")
 
         @user.event_handler("on_user_mute_stopped")
         async def _(agg):
+            self.muted = False
             self.log("MUTE", "user mute stopped")
 
         @assistant.event_handler("on_assistant_turn_stopped")
@@ -80,13 +83,13 @@ class Timeline(BaseObserver):
             self.log("BOT", f'assistant turn stopped interrupted={message.interrupted} "{message.content}"')
 
     # --- backend hooks (calendar_backend.on_commit = timeline.commit) ----------
-    def commit(self, row: dict):
-        self.commits.append(row)
+    def commit(self, row: dict, replaced: dict | None = None):
         late = " (tool was already cancelled)" if row["seq"] in self.cancelled_seqs else ""
-        self.log("BACKEND", f"COMMIT {row['day']} seq={row['seq']}{late}")
+        over = f" (replaced {replaced['day']} seq={replaced['seq']})" if replaced else ""
+        self.log("BACKEND", f"COMMIT {row['day']} seq={row['seq']}{over}{late}")
 
     def reject(self, day: str, seq: int, reason: str):
-        """Hook for a later spec: the backend refuses a stale write."""
+        """The backend refused a stale write (upsert mode, seq guard)."""
         self.log("BACKEND", f"REJECT {day} seq={seq} ({reason})")
 
     # --- observer: frames the aggregator events do not cover -------------------
@@ -97,6 +100,11 @@ class Timeline(BaseObserver):
         # Any other event line means the pending INTERRUPT line will not get its numbers.
         if isinstance(f, _FLUSHES):
             self._flush()
+        if isinstance(f, TranscriptionFrame) and self.muted:
+            # STT is upstream of the user aggregator, so it still transcribes. The
+            # aggregator ignores the frame while muted; a TURN line after "user
+            # mute stopped" would mean it was delivered late instead.
+            self.log("MUTE", f'transcript while muted "{f.text}"')
         if isinstance(f, VADUserStartedSpeakingFrame):
             # The VAD confirms speech start_secs after it began, so back-date the onset.
             self.speech_start = self.now() - f.start_secs
@@ -149,9 +157,10 @@ class Timeline(BaseObserver):
         self.log("INTERRUPT", f"interruption{nums}")
 
     # --- end of session ---------------------------------------------------------
-    def dump(self, context):
-        rows, msgs = self.commits, context.get_messages()
-        print(f"\n=== SESSION DUMP ===\nCALENDAR ({len(rows)} row{'s' * (len(rows) != 1)})")
+    def dump(self, context, rows, policy: str, storage: str):
+        """`rows` is what the backend holds for this caller (see rows_for)."""
+        msgs = context.get_messages()
+        print(f"\n=== SESSION DUMP ===\nPOLICY {policy} (storage: {storage})\nCALENDAR ({len(rows)} row{'s' * (len(rows) != 1)})")
         for r in rows:
             print(f"  {r['day']:<10} seq={r['seq']} at {r['committed_at']}")
         print(f"CONTEXT ({len(msgs)} messages)")
@@ -164,6 +173,9 @@ class Timeline(BaseObserver):
             print(f"  {m['role']:<9} {tool_id}{calls or m.get('content')}")
         days = [r["day"] for r in rows]
         if len(days) == 1 and days[0].lower() == str(self.last_day).lower():
-            print(f"OK: 1 booking, {days[0]}")
+            # The verdict only knows what the model asked for. In deaf mode the
+            # caller's correction never reached the model, so OK proves nothing.
+            note = "  <- expected for deaf: the correction was muted" if policy == "deaf" else ""
+            print(f"OK: 1 booking, {days[0]}{note}")
         else:
             print(f"MISMATCH: {len(days)} bookings ({', '.join(days) or 'none'})")
