@@ -158,12 +158,39 @@ OK: 1 booking, Saturday
 
 To exercise `safe`, the correction must start after the `TOOL book_appointment(day=Friday) started` line prints. The reliable way to reproduce the main script is to wait for that line before speaking, then speak about 2 s later. Check F in `tasks.md` says so.
 
+## Live result: `safe` (check F, second run)
+
+Same recording, Pipecat 1.16.0, Deepgram, OpenAI, SmallWebRTC, run by the repo owner. This time the LLM answered in 0.84 s, so the correction landed in S2. Matches the table.
+
+```
++10.153  TOOL       book_appointment(day=Friday) started  seq=1
++11.650  VAD        user started speaking
++11.650  TURN       user turn started (VAD)
++11.651  INTERRUPT  interruption  tool_cancel_latency=201ms
++11.651  TOOL       book_appointment seq=1 CANCELLED
++13.154  BACKEND    COMMIT Friday seq=1 (tool was already cancelled)
++13.422  TURN       user turn stopped (TurnAnalyzer) "Actually,"
++13.625  TURN       user turn stopped (TurnAnalyzer) "it Saturday."
++14.264  TOOL       book_appointment(day=Saturday) started  seq=3
++17.265  BACKEND    COMMIT Saturday seq=3 (replaced Friday seq=1)
++23.129  BOT        assistant turn stopped interrupted=False "Your appointment is booked for Saturday."
+CALENDAR (1 row)
+  Saturday   seq=3
+OK: 1 booking, Saturday
+```
+
+- The cancel path is the same as in `cancel`: the tool is cancelled 201 ms after the caller speaks, the context records `CANCELLED`, and the shielded Friday write still lands 1.5 s later.
+- The difference is the backend. Saturday's write replaced Friday's row, so the dump has one row.
+- The correction was split into two user turns. Smart Turn judged "Actually," complete, then "it Saturday." started a second turn about 0.2 s later. The first turn's LLM request was cancelled after 0.053 s by the second turn, so no tool call came from it. The word "make" does not appear in either message. The log does not show why (STT segmentation is a guess). The model still called `book_appointment(Saturday)`.
+- `seq` is 3, not 2, because the turn counter went up twice for one spoken correction. The guard only needs `seq` to go up, so this is harmless here. It shows that the turn counter is not a count of caller intents (see Shortcuts).
+- The reject path did not fire. Friday's commit (+13.154) came before Saturday's write started (+14.264), so the guard saw a replace, as predicted in Backend. The reject is exercised only by the hand-driven check C.
+
 ## Shortcuts
 
 | Shortcut | Production approach |
 |---|---|
 | Upsert keyed by `caller_id`, which is the WebRTC session id (`pc_id`) | A business-level idempotency key (for example caller plus slot or booking intent), so a reconnect keeps the same appointment |
-| The turn counter (`user_turns`, count of stopped user turns) is the `seq` for the guard | A server-side version or `If-Match` precondition. The server decides what is stale from a version it issued, not from a number the client increments |
+| The turn counter (`user_turns`, count of stopped user turns) is the `seq` for the guard. One spoken correction can count as two turns (live `safe` run: seq=3), so `seq` orders writes but does not count caller intents | A server-side version or `If-Match` precondition. The server decides what is stale from a version it issued, not from a number the client increments |
 | Seq guard compares only `seq`, with equal `seq` allowed to replace | Compare on the version and return a conflict the client must resolve |
 | Dump reads the backend's rows for the session id | Read the booking back from the real API |
 | The `deaf` note in the dump is a string comparison on the policy name | The verdict compares against what the caller confirmed, so it fails on its own when a correction was lost |
@@ -174,7 +201,7 @@ To exercise `safe`, the correction must start after the `TOOL book_appointment(d
 
 ## Verification status
 
-Live: check D (`deaf`) and check E (`cancel`), see the results above.
+Live: check D (`deaf`), check E (`cancel`) and check F (`safe`, second run), see the results above.
 
 Done offline, no API keys (see `tasks.md` checks A to C):
 - Flag parsing, startup line, server start with `--host 127.0.0.1`.
@@ -182,6 +209,6 @@ Done offline, no API keys (see `tasks.md` checks A to C):
 - Backend and dump for the three policies with shortened timings and a hand-driven interruption: deaf `OK: 1 booking, Friday  <- expected for deaf`, cancel `MISMATCH: 2 bookings (Friday, Saturday)`, safe `OK: 1 booking, Saturday`, and the stale reject.
 
 Not verified:
-- A valid live session for `safe` (check F). The first attempt landed in S1 (see above). `deaf` (check D) and `cancel` (check E) were run live.
+- A live stale reject. Every live run shows Friday landing before Saturday starts. The reject is covered only by check C (hand-driven backend).
 - The late-delivery case in `deaf` (check G).
 - That the model "believes Friday was never booked" in `cancel`. The dump shows the recorded `CANCELLED` tool message. What the model infers from it is model-dependent (same caveat as `timeline-and-session-dump`).
