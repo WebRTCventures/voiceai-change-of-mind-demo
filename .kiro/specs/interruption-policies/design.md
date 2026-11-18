@@ -134,6 +134,29 @@ MISMATCH: 2 bookings (Friday, Saturday)
 - "The model believes Friday was never booked" is inferred from the `CANCELLED` content and from the model not retrying Friday. The log does not show the model's reasoning.
 - The Friday commit came before the correction's user turn stopped (+12.619 against +13.149), so the Saturday write started after Friday had already landed. With `safe` the same timing gives a replace, not a reject.
 
+## First `safe` run: correction landed in S1, so the policy was not exercised
+
+Same setup as the other live runs. This run does not count as check F.
+
+```
++12.196  TURN       user turn stopped (TurnAnalyzer) "Book me for Friday."
++14.400  VAD        user started speaking
++14.400  INTERRUPT  interruption
++14.400  TURN       user turn started (VAD)
++16.425  TURN       user turn stopped (TurnAnalyzer) "Actually, make it Saturday."
++17.269  TOOL       book_appointment(day=Saturday) started  seq=2
++20.269  BACKEND    COMMIT Saturday seq=2
+OK: 1 booking, Saturday
+```
+
+- There is no `TOOL book_appointment(day=Friday) started` line, no Friday commit and no `CANCELLED` entry. The model never emitted a Friday call.
+- The LLM request for "Book me for Friday." went out at +12.196 and was still waiting for its first token when the caller spoke at +14.400 (the logged `OpenAILLMService TTFB: 2.205s`; in the `cancel` and `deaf` runs it was 0.7 to 1.1 s). So the correction landed in S1 (turn confirmed, LLM generating, no tool call yet), not in S2.
+- The interruption cancelled the in-flight LLM request. The INTERRUPT line has no latency numbers, because no tool was running and the bot was not speaking. The context then holds two consecutive user messages ("Book me for Friday.", "Actually, make it Saturday.") and the model made one call, Saturday.
+- The `OK` verdict is true, but the upsert and the seq guard did nothing. The backend saw one write. The run shows that an S1 interruption is harmless, which is a different case from the one this policy fixes.
+- The same S1 window exists under `cancel` and `deaf` (deaf only mutes after `FunctionCallsStartedFrame`, see Differences, item 2). A slow LLM turns the main script into an S1 case in any policy.
+
+To exercise `safe`, the correction must start after the `TOOL book_appointment(day=Friday) started` line prints. The reliable way to reproduce the main script is to wait for that line before speaking, then speak about 2 s later. Check F in `tasks.md` says so.
+
 ## Shortcuts
 
 | Shortcut | Production approach |
@@ -158,6 +181,6 @@ Done offline, no API keys (see `tasks.md` checks A to C):
 - Backend and dump for the three policies with shortened timings and a hand-driven interruption: deaf `OK: 1 booking, Friday  <- expected for deaf`, cancel `MISMATCH: 2 bookings (Friday, Saturday)`, safe `OK: 1 booking, Saturday`, and the stale reject.
 
 Not verified:
-- A live session for `safe` (check F). `deaf` (check D) and `cancel` (check E) were run live.
+- A valid live session for `safe` (check F). The first attempt landed in S1 (see above). `deaf` (check D) and `cancel` (check E) were run live.
 - The late-delivery case in `deaf` (check G).
 - That the model "believes Friday was never booked" in `cancel`. The dump shows the recorded `CANCELLED` tool message. What the model infers from it is model-dependent (same caveat as `timeline-and-session-dump`).
