@@ -34,6 +34,8 @@ _FLUSHES = (
 
 
 def _name(strategy) -> str:
+    if strategy is None:
+        return "no strategy"  # closed by user_turn_stop_timeout (5 s) or by the session ending
     return re.sub(r"UserTurn(Start|Stop)Strategy$", "", type(strategy).__name__)
 
 
@@ -157,10 +159,10 @@ class Timeline(BaseObserver):
         self.log("INTERRUPT", f"interruption{nums}")
 
     # --- end of session ---------------------------------------------------------
-    def dump(self, context, rows, policy: str, storage: str):
+    def dump(self, context, rows, policy: str, storage: str, turn: str):
         """`rows` is what the backend holds for this caller (see rows_for)."""
         msgs = context.get_messages()
-        print(f"\n=== SESSION DUMP ===\nPOLICY {policy} (storage: {storage})\nCALENDAR ({len(rows)} row{'s' * (len(rows) != 1)})")
+        print(f"\n=== SESSION DUMP ===\nPOLICY {policy} (storage: {storage})\nTURN MODE {turn}\nCALENDAR ({len(rows)} row{'s' * (len(rows) != 1)})")
         for r in rows:
             print(f"  {r['day']:<10} seq={r['seq']} at {r['committed_at']}")
         print(f"CONTEXT ({len(msgs)} messages)")

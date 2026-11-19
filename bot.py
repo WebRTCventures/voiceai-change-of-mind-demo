@@ -1,10 +1,12 @@
 """Change-of-mind voice agent: books an appointment through one slow tool.
 
-Run:  uv run bot.py [--policy deaf|cancel|safe]   then open http://localhost:7860/client
+Run:  uv run bot.py [--policy deaf|cancel|safe] [--turn smart|fast]
+      then open http://localhost:7860/client
 """
 
 import argparse
 import os
+import sys
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -28,6 +30,8 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.turns.user_mute import FunctionCallUserMuteStrategy
+from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
 import calendar_backend
@@ -60,20 +64,53 @@ def describe(policy: str) -> str:
     cfg = POLICIES[policy]
     mute = ", ".join(c.__name__ for c in cfg["mute"]) or "none"
     return f"policy={policy}  (user mute: {mute}; storage: {cfg['storage']})"
+# ------------------------------------------------------------------------------
+
+
+# --- Turn detection modes -----------------------------------------------------
+# Only the user turn STOP strategy changes. The start strategies and the VAD
+# (Silero, stop_secs=0.2) stay at Pipecat's defaults, and one pipeline serves both.
+#   smart: Pipecat default, TurnAnalyzerUserTurnStopStrategy with Smart Turn v3.
+#          An audio model judges after each VAD pause whether the sentence is done
+#   fast:  SpeechTimeoutUserTurnStopStrategy. The turn closes once the user has
+#          been quiet for TURN_FAST_TIMEOUT seconds (and a transcript has arrived)
+TURNS = {
+    # name    stop strategies (new instances per session); None = Pipecat default
+    "smart": lambda: None,
+    "fast":  lambda: [SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=fast_timeout())],
+}
+DEFAULT_TURN = "smart"
+
+
+def fast_timeout() -> float:
+    return float(os.getenv("TURN_FAST_TIMEOUT", "0.4"))
+
+
+def describe_turn(turn: str) -> str:
+    if turn == "fast":
+        return f"{turn} (stop strategy: SpeechTimeout, user_speech_timeout={fast_timeout()}s)"
+    return f"{turn} (stop strategy: TurnAnalyzer, Smart Turn v3)"
+
+
+def turn_strategies(turn: str) -> UserTurnStrategies | None:
+    stop = TURNS[turn]()
+    return None if stop is None else UserTurnStrategies(stop=stop)  # start: defaults
+# ------------------------------------------------------------------------------
 
 
 def policy_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Change-of-mind voice agent")
     parser.add_argument("--policy", choices=POLICIES, default=DEFAULT_POLICY)
+    parser.add_argument("--turn", choices=TURNS, default=DEFAULT_TURN)
     return parser
-# ------------------------------------------------------------------------------
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     session_id = runner_args.webrtc_connection.pc_id  # SmallWebRTC connection id
     policy = runner_args.cli_args.policy
+    turn = runner_args.cli_args.turn
     storage = POLICIES[policy]["storage"]
-    print(f"\nSESSION START  {describe(policy)}", flush=True)
+    print(f"\nSESSION START  {describe(policy)}\n               turn={describe_turn(turn)}", flush=True)
     user_turns = 0  # incremented when a user turn is confirmed (S0 -> S1)
 
     # Direct function: Pipecat builds the tool schema from the signature and
@@ -105,6 +142,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(),
             user_mute_strategies=[m() for m in POLICIES[policy]["mute"]],
+            user_turn_strategies=turn_strategies(turn),
         ),
     )
 
@@ -147,7 +185,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
-        timeline.dump(context, calendar_backend.rows_for(session_id), policy, storage)
+        timeline.dump(context, calendar_backend.rows_for(session_id), policy, storage, describe_turn(turn))
         await runner.cancel()
 
     await runner.add_workers(worker)
@@ -156,6 +194,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
 async def bot(runner_args: RunnerArguments):
     """Entry point called by the Pipecat runner for each browser session."""
+    # The runner's main() resets loguru to DEBUG after we are imported, so the level
+    # is set here. The timeline is plain print(), so it is unaffected. LOG_LEVEL=DEBUG
+    # brings Pipecat's own log back (LLM requests, STT/TTS connections).
+    logger.remove()
+    logger.add(sys.stderr, level=os.getenv("LOG_LEVEL", "WARNING").upper())
     transport_params = {
         "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
     }
@@ -167,5 +210,6 @@ if __name__ == "__main__":
     from pipecat.runner.run import main
 
     parser = policy_parser()
-    print(f"STARTUP  {describe(parser.parse_known_args()[0].policy)}", flush=True)
+    args = parser.parse_known_args()[0]
+    print(f"STARTUP  {describe(args.policy)}\n         turn={describe_turn(args.turn)}", flush=True)
     main(parser)  # the runner adds its own flags to our parser
