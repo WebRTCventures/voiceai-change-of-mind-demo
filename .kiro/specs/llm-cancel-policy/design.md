@@ -121,7 +121,23 @@ MISMATCH: 1 booking (Friday), the model cancelled every booking call
 
 Variant `cancel+rebook` (both calls in one response): `cancel_book_appointment refused: 2 book_appointment calls are running`, and the Friday result then arrived `LATE`. Variant `question`: no tool call, Friday result `LATE`, `OK: 1 booking, Friday`. The same harness with `--policy cancel` and `safe` printed `MISMATCH: 2 bookings (Friday, Saturday)` and `OK: 1 booking, Saturday`, as before.
 
-Live: three runs by the repo owner, recorded in `tasks.md`.
+Live: three runs by the repo owner, recorded in `tasks.md` (Results).
+
+## Live result: the model decided differently from run to run
+
+| Run | Model | Calendar | Agent said |
+|---|---|---|---|
+| 1 | cancelled Friday (4.15 s into the tool), then booked Saturday | Saturday | Saturday |
+| 2 | Friday returned at 6.0 s before the model replied (`LATE`). Two refused cancels, then two Saturday bookings | Saturday | "booked for Friday, and now I'll book you for Saturday instead" |
+| 3 | cancelled Friday (5.54 s), then booked Saturday | Saturday | Saturday |
+
+All three verdicts were `OK: 1 booking, Saturday`. Run 2's verdict is right about the backend and wrong about the call.
+
+What the runs show for the post:
+- **The cancel never prevented the Friday write.** It always came after the 3 s commit (difference 5). One row remained because of the upsert. This policy gives the right calendar only because it shares `safe`'s storage.
+- **The model's cancel races the tool.** When the caller is slow (run 2, the last turn closed at 5.18 s), the tool finishes first. The cancel then has nothing to stop, and Pipecat's late-result message tells the model to "convey" a Friday booking that the backend has already replaced. So the outcome depends both on the model and on how fast the caller speaks.
+- **A late result can double the model's actions.** In run 2, two refused cancels and two identical Saturday bookings came about 0.7 s apart, which fits two inference chains (user turn and late result). This is not confirmed from the log. The seq guard let the duplicate replace itself, but `append` storage would have double-booked Saturday.
+- The model always passed `tool_call_id`, and it never cancelled and re-booked in the same response, so difference 6 did not happen live.
 
 ## Shortcuts
 
