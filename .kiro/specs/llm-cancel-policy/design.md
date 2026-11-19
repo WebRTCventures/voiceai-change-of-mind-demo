@@ -91,7 +91,7 @@ Not a prediction of frequency. The live runs decide.
 
 ## Verification
 
-Offline, no API keys (`tasks.md` checks A to C). The harness used the real `OpenAILLMService` function-call machinery, the real context aggregators, `Timeline` and the backend, with `COMMIT_AT=0.6`, `TOTAL=1.6` and only the model's choices scripted. Excerpts:
+Offline, no API keys (`tasks.md` checks A to C). The harness (`llm_cancel_offline.py`, next to this file) used the real `OpenAILLMService` function-call machinery, the real context aggregators, `Timeline` and the backend, with `COMMIT_AT=0.6`, `TOTAL=1.6` and only the model's choices scripted. Excerpts:
 
 Variant `rebook` (books Saturday without cancelling):
 ```

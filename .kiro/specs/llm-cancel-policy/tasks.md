@@ -15,7 +15,7 @@ No automated tests. Verification is manual.
 Done without API keys:
 - [x] A. `uv run bot.py --policy bogus` is rejected and lists `llm-cancel`. `--policy llm-cancel --host 127.0.0.1` prints `STARTUP  policy=llm-cancel  (user mute: none; tool: cancel_on_interruption=False, cancellable_by_llm=True; storage: upsert)` and the server starts. `--policy safe` prints `tool: default`
 - [x] B. Registration probe: with the `llm-cancel` options the service registers `book_appointment` (async, cancellable) and `cancel_book_appointment`, sends both to OpenAI, and appends the two async-tool blocks to the system prompt. With `{}`, only `book_appointment` and the prompt unchanged
-- [x] C. Offline harness (real service, aggregators, timeline, backend; model choices scripted), output in `design.md`: `rebook` gives `LATE` Friday result and `OK: 1 booking, Saturday`; `cancel-only` gives `CANCELLED by the model` and `MISMATCH: 1 booking (Friday), the model cancelled every booking call`; `cancel+rebook` in one response gives `refused: 2 book_appointment calls are running`; `question` gives `OK: 1 booking, Friday`. `cancel` and `safe` keep their verdicts
+- [x] C. Offline harness `llm_cancel_offline.py` in this directory (real service, aggregators, timeline, backend; model choices scripted). Run from the repo root: `uv run python .kiro/specs/llm-cancel-policy/llm_cancel_offline.py <rebook|cancel-only|cancel+rebook|question> [llm-cancel|cancel|safe]`. Output in `design.md`: `rebook` gives `LATE` Friday result and `OK: 1 booking, Saturday`; `cancel-only` gives `CANCELLED by the model` and `MISMATCH: 1 booking (Friday), the model cancelled every booking call`; `cancel+rebook` in one response gives `refused: 2 book_appointment calls are running`; `question` gives `OK: 1 booking, Friday`. `cancel` and `safe` keep their verdicts
 
 Needs keys and a microphone (run these yourself). **Not run by the agent that wrote this spec: no `OPENAI_API_KEY`, `DEEPGRAM_API_KEY` or microphone in its sandbox.**
 
@@ -26,6 +26,7 @@ For each run, note: what the model did (cancelled the Friday call, re-booked wit
 - [x] D. Run 1: the model cancelled Friday, then booked Saturday. `OK: 1 booking, Saturday`
 - [x] E. Run 2: the cancel came after Friday had finished and was refused twice. The model booked Saturday twice and said Friday was booked. `OK: 1 booking, Saturday`, but what the agent said was wrong
 - [x] F. Run 3: the model cancelled Friday, then booked Saturday. `OK: 1 booking, Saturday`
+- [x] G. Screenshot for the post, taken by the repo owner from run 2: timeline lines only (+23.932 to +64.553 and the verdict), Pipecat's log hidden (the Deepgram TTS warnings are log lines, not timeline lines), and the empty `assistant turn stopped ""` lines, `CALENDAR` blocks and the second VAD pair left out. Run 3 is the clean contrast. The image file is not in the repo
 
 ## Results
 
