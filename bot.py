@@ -6,6 +6,7 @@ Run:  uv run bot.py [--policy deaf|cancel|safe] [--turn smart|fast]
 
 import argparse
 import os
+import sys
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -193,6 +194,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
 async def bot(runner_args: RunnerArguments):
     """Entry point called by the Pipecat runner for each browser session."""
+    # The runner's main() resets loguru to DEBUG after we are imported, so the level
+    # is set here. The timeline is plain print(), so it is unaffected. LOG_LEVEL=DEBUG
+    # brings Pipecat's own log back (LLM requests, STT/TTS connections).
+    logger.remove()
+    logger.add(sys.stderr, level=os.getenv("LOG_LEVEL", "WARNING").upper())
     transport_params = {
         "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
     }

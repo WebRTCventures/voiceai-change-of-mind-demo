@@ -27,3 +27,7 @@ Open http://localhost:7860/client. The terminal prints a timeline, and a dump wh
 The timeline names the strategy that closed each turn, for example `user turn stopped (SpeechTimeout)` or `(TurnAnalyzer)`.
 
 **Smart Turn model weights.** The model ships inside the `pipecat-ai` package (`smart-turn-v3.2-cpu.onnx`, about 8.7 MB, installed by `uv sync`). Nothing downloads on first run, and it runs on the CPU. Silero VAD is bundled the same way.
+
+## Output
+
+The terminal shows the timeline (`+12.345  TURN ...`) and the session dump. Pipecat's own debug log is hidden once a session starts. Set `LOG_LEVEL=DEBUG` in `.env` to see it (LLM requests, STT and TTS connections). The uvicorn request lines and the few lines logged while the browser connects come from the runner and stay.
