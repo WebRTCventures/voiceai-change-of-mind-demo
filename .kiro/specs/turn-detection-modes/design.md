@@ -7,7 +7,7 @@
 Turn detection cannot prevent the S2 race. It only changes how often it happens. The case is a caller who trails off: "Book me for Friday, ummm..." and then "actually Saturday" after about 1 s.
 
 - A short silence timeout (`fast`) closes the turn during the pause. The LLM sees "Book me for Friday", calls the tool, and the correction arrives while the tool runs (S2). That is the failure the other specs handle.
-- A model that listens to the audio (`smart`) can hear that the sentence is unfinished and keep the turn open. The correction then joins the same turn, the LLM sees one message, and a single `book_appointment(Saturday)` runs.
+- A model that listens to the audio (`smart`) can hear that the sentence is unfinished and keep the turn open. In the live runs it did, 3 of 3 times. The correction then arrives before any tool has started, so the race is gone. It does not arrive as one message: see "Live results" below.
 
 Smart Turn analyzes the audio each time the VAD reports a stop, so it only helps when the caller's trailing-off sound is part of the same VAD segment as the sentence. A gap longer than `stop_secs` (0.2 s) between "Friday" and "ummm" lets the model see "Book me for Friday" alone, which it can reasonably call complete. The S0 recording has to keep that gap under 0.2 s. Smart Turn does not remove the race. It makes the race rarer for this kind of speech. A caller who says a complete "Book me for Friday." and changes their mind 2 s later still hits S2 in either mode.
 
@@ -107,6 +107,36 @@ The caller's pause is about 1 s. For the S0 case to show `book_appointment(Frida
 
 The first two terms total about 0.6 s with the tuned default (0.2 s VAD stop plus 0.4 s timeout). The LLM term for `gpt-4.1` in the earlier live runs (`interruption-policies/design.md`) was 0.7 to 1.1 s in most sessions (the `cancel` run: turn closed at +13.149, tool started at +13.997, 0.85 s later) and 2.3 s in a slow one. So the total is about 1.1 to 1.7 s normally, which is longer than a 1 s pause. When that happens the correction starts while the LLM is still generating (S1), the tool call never starts, and the run does not count (same as the first `safe` run). `TURN_FAST_TIMEOUT` can only shorten the first two terms. The VAD term is fixed, and the timeout cannot go below 0, so the most it can save over the default is 0.2 s. The first two live runs measured it: the turn closed 0.20 s after the VAD stop and the tool started 0.81 and 1.06 s after that (`tasks.md`), so the correction has to start at least about 1.3 s after the VAD stop. If the live runs show the LLM term is the problem, the options are a longer pause in the script (about 1.5 to 2 s) or a faster `OPENAI_MODEL` in `.env`, not VAD changes. The tuning log is in `tasks.md`.
 
+## Live results
+
+Pipecat 1.16.0, Deepgram, `gpt-4.1`, `--policy cancel`, the recording `s0.m4a` ("Book me for Friday, ummm... actually Saturday", about 2.3 s of VAD-visible silence before the correction). Run by the repo owner. Details per run are in `tasks.md`.
+
+**`fast`, `TURN_FAST_TIMEOUT=0.4`: 3 consecutive hits** (runs 4 to 6). The turn closes during the pause, the Friday tool starts before the correction, and `cancel` ends in `MISMATCH: 2 bookings (Friday, Saturday)`. With 0.2 s the turn closed in a 0.22 s dip between "Friday" and "ummm" (run 3), the "ummm" then interrupted the LLM before it called the tool, and the result was one Saturday booking by luck, not by design. The timeout that works is longer than the dips the live audio contains.
+
+```
+ +10.135  VAD        user stopped speaking
+ +10.535  TURN       user turn stopped (SpeechTimeout) "Book me for Friday."
+ +11.580  TOOL       book_appointment(day=Friday) started  seq=1
+ +13.277  VAD        user started speaking
+ +13.278  INTERRUPT  interruption  tool_cancel_latency=202ms
+ +13.278  TOOL       book_appointment seq=1 CANCELLED
+```
+
+**`smart`: the turn stayed open through the pause in 3 of 3 runs.** No `user turn stopped` line between the first VAD stop and the correction's VAD start (2.3 s later, inside the 3 s fallback). Smart Turn judged "Book me for Friday, ummm" unfinished, and no Friday tool call started before the correction. Two of three runs ended with a single `book_appointment(Saturday)` and `OK: 1 booking, Saturday`. The third called Friday and then Saturday.
+
+```
+ +10.859  VAD        user stopped speaking
+ +13.120  VAD        user started speaking          <- 2.26 s later, no turn closed in between
+ +13.819  VAD        user stopped speaking
+ +13.969  TURN       user turn stopped (TurnAnalyzer) "Book me for Friday."
+ +14.000  INTERRUPT  interruption
+ +14.000  TURN       user turn started (Transcription)
+ +14.150  TURN       user turn stopped (TurnAnalyzer) "Actually, Saturday."
+ +16.028  TOOL       book_appointment(day=Saturday) started  seq=2
+```
+
+**Finding: the correction arrives as a second user message, not in the same turn.** In all three `smart` runs the turn closed exactly 0.150 s after the correction's VAD stop, with only the first transcript. The cause is in `TurnAnalyzerUserTurnStopStrategy`: once the model says the turn is complete, it needs some text and either a finalized transcript or the STT safety net, which waits `ttfs_p99_latency - stop_secs` = 0.35 - 0.2 = 0.15 s after the VAD stop. The text "Book me for Friday." was already in hand, so the safety net fired before Deepgram finalized "Actually, Saturday.". That transcript then started a new turn (`user turn started (Transcription)`) 0.03 to 0.27 s later and interrupted the LLM request the first close had just started. The context holds two consecutive user messages. The LLM saw both, and in 2 of 3 runs booked only Saturday. In the third (`book_appointment(Friday)` then `Saturday`, one after the other, no overlap) it acted on the first message before the second. That is an LLM choice, not the S2 race, and `append` storage turns it into two rows (`MISMATCH`). With `--policy safe` it would end as one Saturday row.
+
 ## Alternatives for the post (not built)
 
 - **Eager or speculative end of turn.** Start the LLM on a likely end of turn and discard the answer if the caller keeps talking. Pipecat 1.16.0 has `EagerUserTurnStrategies` and `EagerUserTurnStopStrategy`. They move the cost of waiting from latency to wasted LLM calls.
@@ -125,4 +155,5 @@ These are named from the installed package for the post to mention. None is used
 | The 1 s pause in the S0 script is an assumption about the caller | Measure real pause lengths from calls (callers pause longer on numbers and addresses) |
 | `fast_timeout()` is read per session and accepts any float | Validate the range at startup |
 | `--turn` parsed twice (startup line, then the runner), like `--policy` | One parse in a custom entry point that starts the runner programmatically |
+| Deepgram's `ttfs_p99_latency` (0.35 s, Pipecat's default) is the STT safety net. A short utterance that follows another in the same turn can be released before its transcript arrives (`smart` live runs), so the correction becomes a second turn | Measure the STT p99 for the deployment (Pipecat's stt-benchmark) and pass it as `ttfs_p99_latency`, or require a finalized transcript |
 | The mode only affects when the turn closes. A caller who resumes after the turn closed still interrupts the tool and the policy decides what happens next | Combine turn detection with the interruption policy and the backend guard from `interruption-policies` |
