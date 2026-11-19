@@ -18,7 +18,7 @@ Done without API keys:
 - [x] B. Real user aggregator with the strategies from `bot.turn_strategies`, fed synthetic frames: `fast` closes the turn `TURN_FAST_TIMEOUT` after the VAD stop line and prints `(SpeechTimeout)`; `smart` builds `TurnAnalyzerUserTurnStopStrategy` (`turn_strategies("smart")` is `None`). Output in `design.md`
 - [x] C. The default Smart Turn model loads from the installed package (`.../smart_turn/data/smart-turn-v3.2-cpu.onnx`), no download
 
-Needs keys and a microphone. **Not run: the agent session that wrote this spec had no `DEEPGRAM_API_KEY`, `OPENAI_API_KEY` or microphone.** Run these yourself with the S0 script: "Book me for Friday, ummm...", pause about 1 s, "actually Saturday". Use `--policy cancel` (default) so the failure is visible in the dump.
+Needs keys and a microphone. **Not run: the agent session that wrote this spec had no `DEEPGRAM_API_KEY`, `OPENAI_API_KEY` or microphone.** Run these yourself with the S0 script: "Book me for Friday, ummm...", pause about 2 s (see the finding in the tuning log: 1 s is too short), "actually Saturday". Use `--policy cancel` (default) so the failure is visible in the dump.
 
 - [ ] D. `--turn fast`, tune `TURN_FAST_TIMEOUT` (start at 0.2) until the order below shows on 3 consecutive runs:
   ```
@@ -45,5 +45,3 @@ Tuning log, one line per run: timeout, whether the order was right, gap from `VA
   | 2 | 0.20 s | 1.06 s | 2.24 s | VAD fired normally. The turn closed exactly `TURN_FAST_TIMEOUT` after the VAD stop |
 
 - **Finding from runs 1 and 2: the S0 pause must be longer than 1 s.** The turn closes 0.2 s after the VAD stop, then the LLM takes 0.8 to 1.06 s to emit the tool call. The correction must start after both, so at least about 1.3 s after `VAD user stopped speaking` (about 1.5 s after the caller stops, since VAD reports the stop 0.2 s late). With the brief's 1 s pause the correction starts while the LLM is still generating (S1) and no Friday call happens. Trim the recording so the silence between "ummm" and "actually" is about 2 s (measure it with `ffmpeg -i recording.wav -af silencedetect=noise=-35dB:d=0.5 -f null -`). `smart` still holds the turn open then: its silence fallback is 3 s (`SmartTurnParams.stop_secs`).
-
-Check the transcript on the `TURN user turn stopped` line. If it includes "ummm", the filler-word assumption in `design.md` is wrong. Update that paragraph.
