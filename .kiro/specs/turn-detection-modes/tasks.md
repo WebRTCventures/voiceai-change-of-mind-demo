@@ -29,7 +29,7 @@ Needs keys and a microphone. **Not run: the agent session that wrote this spec h
   ```
   After each miss, read the gap between `TURN user turn stopped` and `TOOL ... started`. If it is about 0.7 to 1.1 s, the LLM is the limit and the timeout cannot fix it: lengthen the pause (1.5 s or more) or change `OPENAI_MODEL`, and write that down. If the turn closes late, lower the timeout (no effect below about 0.15 s). Record the final value and set it in `.env.example`
 - [x] E. `--turn smart`, 1 or 2 runs: no `TURN user turn stopped` between the first `VAD user stopped speaking` and the correction's `VAD user started speaking`, and one `book_appointment(day=Saturday)` only. Dump: `OK: 1 booking, Saturday`
-- [ ] F. Screenshot the `smart` and `fast` timelines for the post
+- [x] F. Screenshot the `smart` and `fast` timelines for the post. Taken by the repo owner from `smart` run S3 and `fast` run 6 (0.4 s). The image files are not in the repo
 
 ## Results (to be filled in from the live runs)
 
