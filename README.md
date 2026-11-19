@@ -26,7 +26,7 @@ uv run bot.py [--policy deaf|cancel|safe|llm-cancel] [--turn smart|fast]
 
 Defaults: `--policy cancel`, `--turn smart`.
 
-Open http://localhost:7860/client and click **Connect**. The agent greets you. Click **Disconnect** to end the session; the terminal prints the timeline as you talk and a session dump at the end. Click **Connect** again for a new session; you don't need to restart the bot.
+Open http://localhost:7860/client and click **Connect**. The agent greets you. Click **Disconnect** to end the session; the terminal prints the timeline as you talk and a session dump at the end.
 
 ## What to say
 

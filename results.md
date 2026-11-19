@@ -55,7 +55,7 @@ Seconds after `TOOL book_appointment(day=Friday) started`. The Friday write is a
 
 | Mode | Run | Turn closed during the pause? | Friday tool before the correction? | VAD-visible pause | Verdict |
 |---|---|---|---|---|---|
-| `fast`, 0.2 s | 3 | yes, inside a 0.22 s dip between "Friday" and "ummm" | no (the "ummm" interrupted the LLM, S1) | | `OK: 1 booking, Saturday` |
+| `fast`, 0.2 s | 3 | yes, inside a 0.22 s dip between "Friday" and "ummm" | no (the "ummm" interrupted the LLM, S1) | 2.40 s (after the "ummm") | `OK: 1 booking, Saturday` |
 | `fast`, 0.4 s | 4 | yes, 0.40 s after the VAD stop | yes, 1.70 s before | 3.14 s | `MISMATCH: 2 bookings (Friday, Saturday)` |
 | `fast`, 0.4 s | 5 | yes | yes, 0.88 s before | 2.22 s | `MISMATCH: 2 bookings (Friday, Saturday)` |
 | `fast`, 0.4 s | 6 | yes | yes, 0.59 s before | 2.32 s | `MISMATCH: 2 bookings (Friday, Saturday)` |
@@ -98,4 +98,4 @@ From caller speech start to `BotStoppedSpeakingFrame` on the server. Audio alrea
 |---|---|---|---|
 | `timeline-and-session-dump` F | 202 ms | "Your appointment is booked for Friday." (`interrupted=True`) | Not shown. The interruption came about 1.5 s into a short sentence, and the whole sentence was committed |
 
-Open: runbook check 2 (`.kiro/specs/release-checks/runbook.md`) repeats S4 with an early interruption.
+Unverified: the demo brief's claim that Pipecat commits only the words actually spoken for an interrupted assistant turn. No run interrupted early enough to show it, so the post should not make that claim.
