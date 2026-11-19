@@ -1,40 +1,45 @@
 # Change-of-mind voice agent
 
-Companion demo for a post about turn detection, barge-in and tool calling. A caller books an appointment, then changes their mind while the agent is still writing the booking. The agent is built with Pipecat. The scenario and the agent states (S0 to S4) are in `.kiro/steering/demo-brief.md`.
+Companion demo for a blog post about turn detection, barge-in and tool calling. A caller books an appointment, then changes their mind while the agent is still writing the booking. Built with Pipecat.
+
+## Prerequisites
+
+- Python 3.11 or later
+- [uv](https://docs.astral.sh/uv/)
+- A Deepgram API key and an OpenAI API key
+- A browser with a microphone (headphones recommended)
+
+## Setup
+
+```
+git clone https://github.com/WebRTCventures/voiceai-change-of-mind-demo.git
+cd voiceai-change-of-mind-demo
+cp .env.example .env      # fill in DEEPGRAM_API_KEY and OPENAI_API_KEY
+uv sync
+```
 
 ## Run
 
 ```
-cp .env.example .env     # add DEEPGRAM_API_KEY and OPENAI_API_KEY
-uv sync
 uv run bot.py [--policy deaf|cancel|safe|llm-cancel] [--turn smart|fast]
 ```
 
-Open http://localhost:7860/client. The terminal prints a timeline, and a dump when you disconnect.
+Defaults: `--policy cancel`, `--turn smart`.
 
-## Flags
+Open http://localhost:7860/client and click **Connect**. The agent greets you. Click **Disconnect** to end the session; the terminal prints the timeline as you talk and a session dump at the end.
 
-| Flag | Values | What it changes |
-|---|---|---|
-| `--policy` | `deaf`, `cancel` (default), `safe`, `llm-cancel` | What happens when the caller speaks while the booking tool runs |
-| `--turn` | `smart` (default), `fast` | What decides that the caller has finished talking |
+## What to say
 
-### `--policy`
+**Main script** (try each `--policy`):
+1. "Book me for Friday."
+2. Wait for `TOOL  book_appointment(day=Friday) started` in the terminal.
+3. About 2 s later: "Actually, wait, make it Saturday."
+4. Stay quiet until the agent finishes, then disconnect.
 
-- `deaf`: the caller is muted while the tool runs, so the correction is never heard.
-- `cancel`: Pipecat's default. The interruption cancels the tool call, but the backend write still lands.
-- `safe`: like `cancel`, and the backend keeps one booking per caller (upsert with a turn-number guard).
-- `llm-cancel`: the model decides. The tool call keeps running through the interruption, and Pipecat gives the model a `cancel_book_appointment` tool. Storage as `safe`. The outcome depends on the model, so it can differ from run to run.
+**Turn detection** (`--policy cancel`, compare `--turn fast` and `--turn smart`): "Book me for Friday, ummm..." with no gap before "ummm", about 2 s of silence, then "actually Saturday".
 
-### `--turn`
+**Barge-in** (`--policy safe`): "Book me for Friday." When the agent starts the confirmation, interrupt it right away.
 
-- `smart`: Pipecat's default stop strategy, Smart Turn v3. An audio model listens after each pause and judges whether the sentence is finished, so "Book me for Friday, ummm..." can stay open.
-- `fast`: a speech-timeout stop strategy. The turn closes `TURN_FAST_TIMEOUT` seconds (`.env`, default 0.4) after the caller goes quiet, whatever they sounded like.
+## Settings
 
-The timeline names the strategy that closed each turn, for example `user turn stopped (SpeechTimeout)` or `(TurnAnalyzer)`.
-
-**Smart Turn model weights.** The model ships inside the `pipecat-ai` package (`smart-turn-v3.2-cpu.onnx`, about 8.7 MB, installed by `uv sync`). Nothing downloads on first run, and it runs on the CPU. Silero VAD is bundled the same way.
-
-## Output
-
-The terminal shows the timeline (`+12.345  TURN ...`) and the session dump. Pipecat's own debug log is hidden once a session starts. Set `LOG_LEVEL=DEBUG` in `.env` to see it (LLM requests, STT and TTS connections). The uvicorn request lines and the few lines logged while the browser connects come from the runner and stay.
+Optional, in `.env`: `OPENAI_MODEL`, the tool timing (`COMMIT_AT`, `TOTAL`), `TURN_FAST_TIMEOUT`, and `LOG_LEVEL=DEBUG` to show Pipecat's own log. Each is described in `.env.example`.
