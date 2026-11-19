@@ -37,6 +37,13 @@ Final `TURN_FAST_TIMEOUT`: _not tuned yet, shipped default 0.2 s_
 
 Tuning log, one line per run: timeout, whether the order was right, gap from `VAD user stopped speaking` to `TURN user turn stopped`, gap from `TURN user turn stopped` to `TOOL ... started`.
 
-- _empty_
+- Runs 1 and 2, `fast`, timeout 0.2 s, **not counted**: the caller said "Book me for Friday." and waited for the tool to start before correcting, which is the S2 script, not the S0 script (no "ummm", no pause). Both showed the right order, but `smart` would have shown the same, so they do not discriminate between modes.
+
+  | Run | VAD stop to turn close | Turn close to `TOOL started` | `TOOL started` to correction `VAD` start | Notes |
+  |---|---|---|---|---|
+  | 1 | n/a | 0.81 s | 0.70 s | VAD did not fire for the first sentence. The turn started from the transcript (`Transcription`) and closed 2.4 s later, so `TURN_FAST_TIMEOUT` was not what closed it |
+  | 2 | 0.20 s | 1.06 s | 2.24 s | VAD fired normally. The turn closed exactly `TURN_FAST_TIMEOUT` after the VAD stop |
+
+- **Finding from runs 1 and 2: the S0 pause must be longer than 1 s.** The turn closes 0.2 s after the VAD stop, then the LLM takes 0.8 to 1.06 s to emit the tool call. The correction must start after both, so at least about 1.3 s after `VAD user stopped speaking` (about 1.5 s after the caller stops, since VAD reports the stop 0.2 s late). With the brief's 1 s pause the correction starts while the LLM is still generating (S1) and no Friday call happens. Use a pause of about 2 s. `smart` still holds the turn open then: its silence fallback is 3 s (`SmartTurnParams.stop_secs`).
 
 Check the transcript on the `TURN user turn stopped` line. If it includes "ummm", the filler-word assumption in `design.md` is wrong. Update that paragraph.
