@@ -1,6 +1,6 @@
 """Change-of-mind voice agent: books an appointment through one slow tool.
 
-Run:  uv run bot.py [--policy deaf|cancel|safe] [--turn smart|fast]
+Run:  uv run bot.py [--policy deaf|cancel|safe|llm-cancel] [--turn smart|fast]
       then open http://localhost:7860/client
 """
 
@@ -13,6 +13,7 @@ from loguru import logger
 
 load_dotenv(override=True)
 
+from pipecat.adapters.llm.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -45,17 +46,23 @@ Keep replies to one short sentence."""
 GREETING = "Hi, I can book your appointment. Which day works for you?"
 
 # --- Interruption policies ----------------------------------------------------
-# One pipeline. A policy is only a user mute setting plus a backend storage mode.
+# One pipeline. A policy is a user mute setting, book_appointment's tool options
+# and a backend storage mode.
 #   deaf:   user input is muted while a tool runs, so the correction is never heard
 #   cancel: Pipecat default. The interruption cancels the tool, but the backend
 #           write is shielded and still lands, and the storage just appends
 #   safe:   same as cancel, but the backend keeps one row per caller and rejects
 #           a write from an older turn (seq guard)
+#   llm-cancel: the model decides. The tool is async, so the interruption does
+#           not cancel it, and Pipecat offers the model a cancel_book_appointment
+#           tool. Whether Friday gets cancelled depends on the model. Storage as safe
+LLM_CANCELLABLE = {"cancel_on_interruption": False, "cancellable_by_llm": True}
 POLICIES = {
-    # name      user mute strategies (classes, one instance per session)   storage
-    "deaf":   {"mute": [FunctionCallUserMuteStrategy], "storage": "append"},
-    "cancel": {"mute": [],                             "storage": "append"},
-    "safe":   {"mute": [],                             "storage": "upsert"},
+    # name          user mute strategies (classes)          tool options      storage
+    "deaf":       {"mute": [FunctionCallUserMuteStrategy], "tool": {},              "storage": "append"},
+    "cancel":     {"mute": [],                             "tool": {},              "storage": "append"},
+    "safe":       {"mute": [],                             "tool": {},              "storage": "upsert"},
+    "llm-cancel": {"mute": [],                             "tool": LLM_CANCELLABLE, "storage": "upsert"},
 }
 DEFAULT_POLICY = "cancel"
 
@@ -63,7 +70,8 @@ DEFAULT_POLICY = "cancel"
 def describe(policy: str) -> str:
     cfg = POLICIES[policy]
     mute = ", ".join(c.__name__ for c in cfg["mute"]) or "none"
-    return f"policy={policy}  (user mute: {mute}; storage: {cfg['storage']})"
+    tool = ", ".join(f"{k}={v}" for k, v in cfg["tool"].items()) or "default"
+    return f"policy={policy}  (user mute: {mute}; tool: {tool}; storage: {cfg['storage']})"
 # ------------------------------------------------------------------------------
 
 
@@ -114,8 +122,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     user_turns = 0  # incremented when a user turn is confirmed (S0 -> S1)
 
     # Direct function: Pipecat builds the tool schema from the signature and
-    # docstring. Default tool options, so the call is cancelled on interruption
-    # (every policy; deaf avoids the interruption by muting the user instead).
+    # docstring. The tool options come from the policy (tool_options below).
+    # Default options: the call is cancelled on interruption (deaf avoids the
+    # interruption by muting the user instead). llm-cancel: the call keeps running
+    # and only the model can cancel it.
     async def book_appointment(params: FunctionCallParams, day: str):
         """Book an appointment on a day of the week.
 
@@ -135,8 +145,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # Tools passed in the context are registered with the LLM automatically.
-    context = LLMContext(tools=[book_appointment])
+    # Tools passed in the context are registered with the LLM automatically, with
+    # the options tool_options attached. With cancellable_by_llm=True Pipecat also
+    # registers cancel_book_appointment and adds its async-tool guidance to the
+    # system prompt.
+    context = LLMContext(tools=[tool_options(book_appointment, **POLICIES[policy]["tool"])])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
