@@ -25,11 +25,7 @@ For every session, one line in this form (copy it from the terminal; the timesta
 check, run, valid?, verdict line, INTERRUPT line(s), anything odd
 ```
 
-Also paste the **full timeline** of:
-- one clean S4 run (check 6), and
-- one clean `llm-cancel` run, if you do the optional runs in check 7.
-
-The README has no live excerpt for those two yet. Pasted timelines become its excerpts.
+Also paste the **full timeline** of one clean S4 run (check 6). No live S4 timeline is recorded in the repo yet, and the post needs one.
 
 ## 1. Fresh clone to working conversation
 
@@ -151,7 +147,7 @@ Pass:
 - `INTERRUPT  interruption  yield_latency=<n>ms` before `BOT  bot stopped speaking`.
 - `BOT  assistant turn stopped interrupted=True "<text>"` where `<text>` ends where you cut in: it is shorter than the full confirmation, it matches the words you heard, and it does not end with the words you did not hear.
 
-Record per run: `yield_latency`, the committed text, and the last word you heard. If the committed text is the full sentence although you cut in early, note it as a fail: the README states the opposite, and one of the two has to change.
+Record per run: `yield_latency`, the committed text, and the last word you heard. If the committed text is the full sentence although you cut in early, note it as a fail: the demo brief claims only spoken words are committed, so the post must not repeat that claim unless a run shows it.
 
 Paste the full timeline of one clean run.
 
