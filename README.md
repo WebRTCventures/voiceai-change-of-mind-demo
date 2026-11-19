@@ -128,7 +128,7 @@ Run it with `--policy safe`, so that a re-booking leaves one row. The confirmati
 | `deaf` | 1 row, Friday | Friday | `OK: 1 booking, Friday  <- expected for deaf: the correction was muted` |
 | `cancel` | 2 rows, Friday and Saturday | Saturday | `MISMATCH: 2 bookings (Friday, Saturday)` |
 | `safe` | 1 row, Saturday (Friday replaced) | Saturday | `OK: 1 booking, Saturday` |
-| `llm-cancel` | 1 row, Saturday (Friday replaced) | Depends on the model. Saturday in 2 of 3 live runs; in the third the agent also said Friday was booked | `OK: 1 booking, Saturday` |
+| `llm-cancel` | 1 row, Saturday (Friday replaced) | Depends on the model and on how fast the caller finishes the correction. Saturday in 2 of 3 live runs; in the third the agent said Friday was booked | `OK: 1 booking, Saturday` |
 
 The verdict compares the calendar with the last booking the model asked for and did not cancel. It cannot know what the caller wanted. In `deaf` the model never hears the correction, so `OK` there means the failure is complete. In `llm-cancel` an `OK` can sit next to a reply that told the caller the wrong day.
 
@@ -216,13 +216,49 @@ OK: 1 booking, Saturday
 
 ### `llm-cancel`
 
-No live timeline excerpt is recorded in this repo yet. The lines to look for:
+The model cancels the Friday call:
 
-- `INTERRUPT  interruption  (book_appointment seq=1 keeps running)`: the interruption does not cancel the async tool call.
-- `TOOL  model called cancel_book_appointment(...)`, then `book_appointment seq=1 CANCELLED by the model` and `cancel_book_appointment cancelled <id>`, or `cancel_book_appointment refused: ...` when nothing is left to cancel.
-- `... result {...}  LATE: caller spoke since, injected as a developer message`: the Friday result arrived after the correction. Pipecat tells the model to pass it on, so the agent may announce Friday.
+```
+  +9.520  TOOL       book_appointment(day=Friday) started  seq=1
+ +11.675  VAD        user started speaking
+ +11.675  INTERRUPT  interruption  (book_appointment seq=1 keeps running)
+ +12.521  BACKEND    COMMIT Friday seq=1
+ +13.485  TURN       user turn stopped (TurnAnalyzer) "Actually,"
+ +13.741  TURN       user turn stopped (TurnAnalyzer) "Saturday."
+ +15.056  TOOL       model called cancel_book_appointment(tool_call_id=call_3s39vla1SErvKkmbmP7bvxIW)
+ +15.057  TOOL       book_appointment seq=1 CANCELLED by the model
+ +15.057  TOOL       cancel_book_appointment cancelled call_3s39vla1SErvKkmbmP7bvxIW
+ +15.742  TOOL       book_appointment(day=Saturday) started  seq=3
+ +18.743  BACKEND    COMMIT Saturday seq=3 (replaced Friday seq=1)
+ +24.740  BOT        assistant turn stopped interrupted=False "Your appointment is booked for Saturday."
+OK: 1 booking, Saturday
+```
 
-In the three live runs the Friday write landed before the model's cancel every time (the commit is at 3 s, the cancel came at 4.15 s and 5.54 s). The one-row calendar comes from the upsert storage, not from the cancel.
+The same script, with a caller who finished the correction later:
+
+```
+ +23.932  TOOL       book_appointment(day=Friday) started  seq=1
+ +25.912  VAD        user started speaking
+ +25.912  INTERRUPT  interruption  (book_appointment seq=1 keeps running)
+ +26.933  BACKEND    COMMIT Friday seq=1
+ +29.116  TURN       user turn stopped (TurnAnalyzer) "Make it Saturday."
+ +29.933  TOOL       book_appointment seq=1 result {"status": "booked", "day": "Friday"}  LATE: caller spoke since, injected as a developer message
+ +31.247  TOOL       model called cancel_book_appointment(tool_call_id=call_kwPbhDQk3MDsFbJC7nH5LTnH)
+ +31.247  TOOL       cancel_book_appointment refused: no book_appointment call is running
+ +32.009  TOOL       model called cancel_book_appointment(tool_call_id=call_kwPbhDQk3MDsFbJC7nH5LTnH)
+ +32.009  TOOL       cancel_book_appointment refused: no book_appointment call is running
+ +32.859  TOOL       book_appointment(day=Saturday) started  seq=3
+ +33.499  TOOL       book_appointment(day=Saturday) started  seq=3
+ +35.860  BACKEND    COMMIT Saturday seq=3 (replaced Friday seq=1)
+ +36.500  BACKEND    COMMIT Saturday seq=3 (replaced Saturday seq=3)
+ +64.553  BOT        assistant turn stopped interrupted=False "Your appointment is booked for Friday, and now I'll book you for Saturday instead."
+OK: 1 booking, Saturday
+```
+
+- `INTERRUPT ... (book_appointment seq=1 keeps running)`: the interruption does not cancel the async tool call. There is no `tool_cancel_latency`.
+- `model called cancel_book_appointment(...)` followed by `CANCELLED by the model`: the model chose to cancel. Look at the times: the cancel comes at 5.54 s into the tool, after the Friday write at 3.00 s. The cancel stops Friday's result from reaching the model, not the write.
+- `LATE: caller spoke since, injected as a developer message`: the Friday call finished (6.00 s) before the model answered the correction, which closed at 5.18 s. Pipecat adds the result as a developer message that tells the model to pass it on. The model's cancels then have nothing to stop (`refused`), it books Saturday twice, and the agent tells the caller Friday is booked.
+- Both runs end `OK: 1 booking, Saturday`. The one-row calendar comes from the upsert storage, not from the cancel. Read the agent's last `BOT` line as well as the verdict.
 
 ### `--turn fast` (S0 script)
 

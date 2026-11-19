@@ -22,12 +22,12 @@ From `.env` and the test machine (fill in from the runs):
 
 | Item | Value |
 |---|---|
-| `OPENAI_MODEL` | |
-| `COMMIT_AT` / `TOTAL` | |
+| `OPENAI_MODEL` | `gpt-4.1` for the `llm-cancel` runs (as recorded in `llm-cancel-policy/tasks.md`; the terminal log does not print it) |
+| `COMMIT_AT` / `TOTAL` | 3.0 / 6.0 for the `llm-cancel` runs (Friday commit at +3.00 s and result at +6.00 s in the timelines) |
 | `TURN_FAST_TIMEOUT` | |
-| Python | |
+| Python | 3.11.18 (Pipecat's startup line) |
 | uv | |
-| OS | |
+| OS | Linux, Nix dev shell |
 | Browser | |
 | Microphone, headphones or speakers | |
 | S0 input (live voice or recording) | |
@@ -48,7 +48,22 @@ S2 main script, `--turn smart`, default tool duration. A run counts only if the 
 | `deaf` | 1 row, Friday, correction muted | / 5 | | |
 | `cancel` | 2 rows, Friday and Saturday, Friday `CANCELLED` in context | / 5 | | |
 | `safe` | 1 row, Saturday | / 5 | | |
-| `llm-cancel` (optional) | 1 row, Saturday; agent says only Saturday | calendar / 5, speech / 5 | | |
+| `llm-cancel` (optional) | 1 row, Saturday; agent says only Saturday | calendar 3 / 3, speech 2 / 3 (2 runs to go) | 0 | Run 2: the agent said Friday was booked. Details below |
+
+### `llm-cancel` runs
+
+2026-11-19, branch `spec/llm-cancel-policy`. Its `bot.py`, `timeline.py`, `calendar_backend.py`, `.env.example` and `uv.lock` are identical to `main`. These are the same three runs as in `.kiro/specs/llm-cancel-policy/tasks.md`. Times are seconds after `TOOL book_appointment(day=Friday) started`. The Friday write is at 3.00 s and the Friday result at 6.00 s in every run.
+
+| Run | Correction speech starts | Last correction turn closes | Model's cancel | Cancel result | Saturday tool starts | Agent said | Calendar |
+|---|---|---|---|---|---|---|---|
+| 1 | 0.52 s | 3.05 s | 4.15 s | cancelled | 8.40 s | "Your appointment is booked for Saturday." | Saturday |
+| 2 | 1.98 s | 5.18 s | 7.32 s and 8.08 s | refused twice, Friday had returned at 6.00 s (`LATE`) | 8.93 s and 9.57 s | "Your appointment is booked for Friday, and now I'll book you for Saturday instead." | Saturday |
+| 3 | 2.16 s | 4.22 s | 5.54 s | cancelled | 6.22 s | "Your appointment is booked for Saturday." | Saturday |
+
+- The cancel always came after the Friday write: 1.15 s after it in run 1 and 2.54 s after it in run 3.
+- From the last correction turn closing to the model's cancel: 1.10 s (run 1) and 1.32 s (run 3).
+- From the turn "Book me for Friday." closing to the Friday tool starting: 1.01, 0.85 and 0.73 s.
+- Run 2: a second reply, "You're now booked for Saturday. Your Friday appointment was also booked earlier; let me know if you want to cancel that.", was never spoken. The Deepgram TTS websocket closed with a keepalive ping timeout, and Pipecat logged that the audio context produced no audio and left the text out of the context.
 
 ## S0 hit rate per turn mode
 
