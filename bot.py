@@ -83,7 +83,7 @@ DEFAULT_TURN = "smart"
 
 
 def fast_timeout() -> float:
-    return float(os.getenv("TURN_FAST_TIMEOUT", "0.2"))
+    return float(os.getenv("TURN_FAST_TIMEOUT", "0.4"))
 
 
 def describe_turn(turn: str) -> str:

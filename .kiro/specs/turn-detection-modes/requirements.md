@@ -25,7 +25,7 @@ Acceptance criteria:
 
 ### 3. Configuration
 Acceptance criteria:
-1. `TURN_FAST_TIMEOUT` is read from `.env`, in seconds. Default `0.2` when unset.
+1. `TURN_FAST_TIMEOUT` is read from `.env`, in seconds. Default `0.4` when unset (the tuned value, see `tasks.md`).
 2. `.env.example` lists `TURN_FAST_TIMEOUT` with a comment.
 3. The final tuned value is recorded in `tasks.md` (the shipped default in `.env.example` is that value).
 

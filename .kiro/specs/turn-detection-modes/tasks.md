@@ -20,7 +20,7 @@ Done without API keys:
 
 Needs keys and a microphone. **Not run: the agent session that wrote this spec had no `DEEPGRAM_API_KEY`, `OPENAI_API_KEY` or microphone.** Run these yourself with the S0 script: "Book me for Friday, ummm...", pause about 2 s (see the finding in the tuning log: 1 s is too short), "actually Saturday". Use `--policy cancel` (default) so the failure is visible in the dump.
 
-- [ ] D. `--turn fast`, tune `TURN_FAST_TIMEOUT` (start at 0.2) until the order below shows on 3 consecutive runs:
+- [x] D. `--turn fast`, tune `TURN_FAST_TIMEOUT` (start at 0.2) until the order below shows on 3 consecutive runs:
   ```
   VAD   user stopped speaking
   TURN  user turn stopped (SpeechTimeout) "..."
@@ -33,7 +33,7 @@ Needs keys and a microphone. **Not run: the agent session that wrote this spec h
 
 ## Results (to be filled in from the live runs)
 
-Final `TURN_FAST_TIMEOUT`: _not tuned yet, shipped default 0.2 s_
+Final `TURN_FAST_TIMEOUT`: **0.4 s** (runs 4 to 6, three consecutive hits; 0.2 s missed in run 3). Set in `.env.example` and as the code default.
 
 Tuning log, one line per run: timeout, whether the order was right, gap from `VAD user stopped speaking` to `TURN user turn stopped`, gap from `TURN user turn stopped` to `TOOL ... started`.
 
@@ -55,10 +55,13 @@ Tuning log, one line per run: timeout, whether the order was right, gap from `VA
   | 2 | 0.20 s | 1.06 s | 2.24 s | VAD fired normally. The turn closed exactly `TURN_FAST_TIMEOUT` after the VAD stop |
   | 3 | 0.20 s | no Friday call | n/a | miss in S1, see run 3 below |
   | 4 | 0.40 s | 1.05 s | 1.70 s | **hit**, `TURN_FAST_TIMEOUT=0.4`, `s0.m4a` |
+  | 5 | 0.40 s | 0.94 s | 0.88 s | **hit** |
+  | 6 | 0.40 s | 1.33 s | 0.59 s | **hit**. The VAD split "Friday" and "ummm" by 0.24 s (`9.976` to `10.216`), which would have closed the turn at 0.2 s as in run 3, and 0.4 s bridged it |
 
 - Run 3, `fast`, 0.2 s, `s0.m4a`: **miss (S1), not counted.** The live VAD did not keep "Friday, ummm" as one segment, although offline it does. It saw `9.535-9.732`, `9.913-10.553` and `10.772-11.295`. The gap between the second and third (10.553 to 10.772, 0.22 s) is longer than the turn's 0.2 s timeout, so `TURN user turn stopped (SpeechTimeout) "Book me for Friday."` fired at +10.753. The "ummm" `VAD user started speaking` came 19 ms later (+10.772) and interrupted the LLM before it emitted a tool call, so `book_appointment(Friday)` never started. The turn that the "ummm" opened had no transcript (Deepgram drops the filler), so `SpeechTimeout` could not close it, and it stayed open until "Actually, Saturday." (+14.675). Result: two consecutive user messages, one `book_appointment(Saturday)`, `OK: 1 booking, Saturday`. The VAD-visible silence after the "ummm" was 2.4 s (+11.295 to +13.695), as intended. The strategy did what it is configured to do: it closed 0.20 s after a VAD stop. The timeout is shorter than a dip the live audio contains.
 - Next: `TURN_FAST_TIMEOUT=0.4` in `.env`. A start of "ummm" within 0.4 s of the previous stop cancels the pending close (the strategy discards its timers on every VAD start), so the dip is bridged. The turn then closes at about +11.7 (0.4 s after the "ummm" stop at +11.295), the tool starts about 0.8 to 1.1 s later, and the correction's `VAD` start at +13.7 comes after it. Predicted margin about 0.9 s. Leave `.env.example` at 0.2 until a live run confirms the value.
 - Run 4, `fast`, `TURN_FAST_TIMEOUT=0.4`, `s0.m4a`: **hit (1 of 3 consecutive).** `VAD user stopped speaking` +10.135, `TURN user turn stopped (SpeechTimeout) "Book me for Friday."` +10.535 (0.40 s later), `TOOL book_appointment(day=Friday) started` +11.580 (1.05 s later), correction `VAD user started speaking` +13.277 (1.70 s after the tool started). The interruption cancelled the tool (`tool_cancel_latency=202ms`), the Friday write landed anyway, then Saturday: `MISMATCH: 2 bookings (Friday, Saturday)`, as `cancel` is expected to. The live VAD saw one segment of 1.24 s, which is "Book me for Friday" only, with no event for the "ummm" (it did see it in run 3). So the VAD-visible silence before the correction was 3.14 s here, not the 1.8 to 2.4 s the file gives when the "ummm" is detected. Whether the VAD sees the "ummm" varies from run to run.
+- Runs 5 and 6, `fast`, `TURN_FAST_TIMEOUT=0.4`: **hits (3 of 3 consecutive).** Run 5: one VAD segment of 1.56 s, stop +13.593, turn closed +13.995, `TOOL Friday started` +14.933, correction `VAD` start +15.812. Run 6: two VAD segments (+8.937 to +9.976 and +10.216 to +10.776, a 0.24 s gap), turn closed +11.177 (0.40 s after the last stop), tool +12.511, correction +13.096. Both ended `MISMATCH: 2 bookings (Friday, Saturday)`, as `cancel` should. The margin between `TOOL Friday started` and the correction was 1.70, 0.88 and 0.59 s in runs 4 to 6, and it shrinks with LLM latency (turn close to tool start: 1.05, 0.94, 1.33 s). A slow response (about 2.3 s, seen once earlier) would miss. 0.4 s is the tuned value.
 - **Risk for `smart`:** with 3.14 s of VAD silence, Smart Turn's 3 s silence fallback (`SmartTurnParams.stop_secs`, counted from the VAD stop) fires about 0.14 s before the correction's `VAD` start event. If the model calls the turn incomplete at the stop, it would still close at +3 s and the correction would land in S1 (no Friday call, same shape as run 3). If it calls it complete, it closes at once and the S2 race happens, as in `fast`. Run `smart` on the file as it is first. Only if it closes through the 3 s fallback, shorten the file's pause by about 0.4 s (not more: with the "ummm" detected, the silence before the correction is 2.4 s, and `fast` needs about 1.5 s of it).
 
 - **Finding from runs 1 and 2: the S0 recording needs two changes, and the second matters for `smart`.**

@@ -62,7 +62,7 @@ TURNS = {
 
 `run_bot` reads `runner_args.cli_args.turn` and passes `user_turn_strategies=turn_strategies(turn)` to `LLMUserAggregatorParams`. `turn_strategies` returns `None` for `smart` and `UserTurnStrategies(stop=[...])` for `fast`. The pipeline, VAD, tool and prompt are the same for both. `--turn` is added to the same parser as `--policy` (the runner's `main(parser)` accepts it, see `interruption-policies/design.md`).
 
-`fast_timeout()` reads `TURN_FAST_TIMEOUT` when a session starts (`load_dotenv(override=True)` has already run), default `0.2`. A value that is not a number fails with Python's `ValueError` when the session starts.
+`fast_timeout()` reads `TURN_FAST_TIMEOUT` when a session starts (`load_dotenv(override=True)` has already run), default `0.4` (tuned, see `tasks.md`). A value that is not a number fails with Python's `ValueError` when the session starts.
 
 ## Output changes
 
@@ -105,7 +105,7 @@ The caller's pause is about 1 s. For the S0 case to show `book_appointment(Frida
 
 `VAD stop (0.2 s after speech ends) + TURN_FAST_TIMEOUT (+ STT wait if not finalized) + LLM time to first tool call`
 
-The first two terms total about 0.4 to 0.55 s with the default. The LLM term for `gpt-4.1` in the earlier live runs (`interruption-policies/design.md`) was 0.7 to 1.1 s in most sessions (the `cancel` run: turn closed at +13.149, tool started at +13.997, 0.85 s later) and 2.3 s in a slow one. So the total is about 1.1 to 1.7 s normally, which is longer than a 1 s pause. When that happens the correction starts while the LLM is still generating (S1), the tool call never starts, and the run does not count (same as the first `safe` run). `TURN_FAST_TIMEOUT` can only shorten the first two terms. The VAD term is fixed, and the timeout cannot go below 0, so the most it can save over the default is 0.2 s. The first two live runs measured it: the turn closed 0.20 s after the VAD stop and the tool started 0.81 and 1.06 s after that (`tasks.md`), so the correction has to start at least about 1.3 s after the VAD stop. If the live runs show the LLM term is the problem, the options are a longer pause in the script (about 1.5 to 2 s) or a faster `OPENAI_MODEL` in `.env`, not VAD changes. The tuning log is in `tasks.md`.
+The first two terms total about 0.6 s with the tuned default (0.2 s VAD stop plus 0.4 s timeout). The LLM term for `gpt-4.1` in the earlier live runs (`interruption-policies/design.md`) was 0.7 to 1.1 s in most sessions (the `cancel` run: turn closed at +13.149, tool started at +13.997, 0.85 s later) and 2.3 s in a slow one. So the total is about 1.1 to 1.7 s normally, which is longer than a 1 s pause. When that happens the correction starts while the LLM is still generating (S1), the tool call never starts, and the run does not count (same as the first `safe` run). `TURN_FAST_TIMEOUT` can only shorten the first two terms. The VAD term is fixed, and the timeout cannot go below 0, so the most it can save over the default is 0.2 s. The first two live runs measured it: the turn closed 0.20 s after the VAD stop and the tool started 0.81 and 1.06 s after that (`tasks.md`), so the correction has to start at least about 1.3 s after the VAD stop. If the live runs show the LLM term is the problem, the options are a longer pause in the script (about 1.5 to 2 s) or a faster `OPENAI_MODEL` in `.env`, not VAD changes. The tuning log is in `tasks.md`.
 
 ## Alternatives for the post (not built)
 

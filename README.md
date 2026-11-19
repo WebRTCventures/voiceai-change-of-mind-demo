@@ -22,7 +22,7 @@ Open http://localhost:7860/client. The terminal prints a timeline, and a dump wh
 ### `--turn`
 
 - `smart`: Pipecat's default stop strategy, Smart Turn v3. An audio model listens after each pause and judges whether the sentence is finished, so "Book me for Friday, ummm..." can stay open.
-- `fast`: a speech-timeout stop strategy. The turn closes `TURN_FAST_TIMEOUT` seconds (`.env`, default 0.2) after the caller goes quiet, whatever they sounded like.
+- `fast`: a speech-timeout stop strategy. The turn closes `TURN_FAST_TIMEOUT` seconds (`.env`, default 0.4) after the caller goes quiet, whatever they sounded like.
 
 The timeline names the strategy that closed each turn, for example `user turn stopped (SpeechTimeout)` or `(TurnAnalyzer)`.
 
