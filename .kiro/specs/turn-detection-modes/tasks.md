@@ -37,13 +37,13 @@ Final `TURN_FAST_TIMEOUT`: _not tuned yet, shipped default 0.2 s_
 
 Tuning log, one line per run: timeout, whether the order was right, gap from `VAD user stopped speaking` to `TURN user turn stopped`, gap from `TURN user turn stopped` to `TOOL ... started`.
 
-- Runs 1 and 2, `fast`, timeout 0.2 s, **not counted**: the caller said "Book me for Friday." and waited for the tool to start before correcting, which is the S2 script, not the S0 script (no "ummm", no pause). Both showed the right order, but `smart` would have shown the same, so they do not discriminate between modes.
+- Runs 1 and 2, `fast`, timeout 0.2 s, **not counted**: they used a recording of "Book me for Friday, ummm... actually Saturday", but the silence between "ummm" and "actually" was about 3.5 s in run 2 (first speech ended about +10.9 s, the correction began about +14.4 s). That is too long to tell the modes apart: `fast` closes the turn at 0.2 s, and `smart` would also close it at its 3 s silence fallback. Both showed the right order for `fast`, which proves the wiring only. "ummm" was not in the transcript ("Book me for Friday."), so Deepgram drops the filler, as `design.md` expected.
 
   | Run | VAD stop to turn close | Turn close to `TOOL started` | `TOOL started` to correction `VAD` start | Notes |
   |---|---|---|---|---|
   | 1 | n/a | 0.81 s | 0.70 s | VAD did not fire for the first sentence. The turn started from the transcript (`Transcription`) and closed 2.4 s later, so `TURN_FAST_TIMEOUT` was not what closed it |
   | 2 | 0.20 s | 1.06 s | 2.24 s | VAD fired normally. The turn closed exactly `TURN_FAST_TIMEOUT` after the VAD stop |
 
-- **Finding from runs 1 and 2: the S0 pause must be longer than 1 s.** The turn closes 0.2 s after the VAD stop, then the LLM takes 0.8 to 1.06 s to emit the tool call. The correction must start after both, so at least about 1.3 s after `VAD user stopped speaking` (about 1.5 s after the caller stops, since VAD reports the stop 0.2 s late). With the brief's 1 s pause the correction starts while the LLM is still generating (S1) and no Friday call happens. Use a pause of about 2 s. `smart` still holds the turn open then: its silence fallback is 3 s (`SmartTurnParams.stop_secs`).
+- **Finding from runs 1 and 2: the S0 pause must be longer than 1 s.** The turn closes 0.2 s after the VAD stop, then the LLM takes 0.8 to 1.06 s to emit the tool call. The correction must start after both, so at least about 1.3 s after `VAD user stopped speaking` (about 1.5 s after the caller stops, since VAD reports the stop 0.2 s late). With the brief's 1 s pause the correction starts while the LLM is still generating (S1) and no Friday call happens. Trim the recording so the silence between "ummm" and "actually" is about 2 s (measure it with `ffmpeg -i recording.wav -af silencedetect=noise=-35dB:d=0.5 -f null -`). `smart` still holds the turn open then: its silence fallback is 3 s (`SmartTurnParams.stop_secs`).
 
 Check the transcript on the `TURN user turn stopped` line. If it includes "ummm", the filler-word assumption in `design.md` is wrong. Update that paragraph.
