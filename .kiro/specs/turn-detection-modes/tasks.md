@@ -37,11 +37,28 @@ Final `TURN_FAST_TIMEOUT`: _not tuned yet, shipped default 0.2 s_
 
 Tuning log, one line per run: timeout, whether the order was right, gap from `VAD user stopped speaking` to `TURN user turn stopped`, gap from `TURN user turn stopped` to `TOOL ... started`.
 
-- Runs 1 and 2, `fast`, timeout 0.2 s, **not counted**: they used a recording ("Recorder - 20261119-0946(1).m4a", 6.98 s). `silencedetect` at -25 dB: "Book me for Friday" 0.95 to 2.30 s, a 0.39 s dip, "ummm" 2.70 to 3.84 s, a 1.59 s pause, "actually Saturday" 5.43 to 6.36 s. In run 2 the correction started 4.5 s after the first speech, as in the file, so the file played whole. But the VAD produced one segment of 1.24 s (just "Book me for Friday") and no event for "ummm", so with the default Silero settings "ummm" counts as silence. The bot heard about 3.1 to 3.5 s of silence instead of 1.6 s. That is past Smart Turn's 3 s fallback, so `smart` would also close the turn, and the two modes cannot be told apart. "ummm" is also not in the transcript ("Book me for Friday."), which `design.md` expected. Both runs showed the right order for `fast`, which proves the wiring only. The "ummm" is about as loud as "Friday" (mean -18.3 dB against -15.7 dB), so volume is not the cause. To see what the VAD makes of the file without a live session, run `uv run python .kiro/specs/turn-detection-modes/vad_file.py "<file>"` (needs `ffmpeg`). It prints the demo's Silero confidence and volume values (`confidence >= 0.7` and `min_volume >= 0.6` are both needed) every 100 ms and the state changes.
+- Runs 1 and 2, `fast`, timeout 0.2 s, **not counted**: they used a recording ("Recorder - 20261119-0946(1).m4a", 6.98 s). Both showed the right order for `fast`, which proves the wiring only, not the S0 case. `ffmpeg silencedetect` at -25 dB: "Book me for Friday" 0.95 to 2.30 s, a 0.39 s dip, "ummm" 2.70 to 3.84 s, a 1.59 s pause, "actually Saturday" 5.43 to 6.36 s. The "ummm" is as loud as "Friday" (mean -18.3 dB against -15.7 dB). "ummm" is not in the transcript ("Book me for Friday."), as `design.md` expected.
+
+  What the demo's Silero VAD makes of the file (`vad_file.py`, default parameters, offline):
+
+  | VAD segment | Speaking | Back to quiet |
+  |---|---|---|
+  | "Book me for Friday" | 1.09 s | 2.46 s |
+  | "ummm" | 2.85 s | 3.20 s |
+  | "actually Saturday" | 5.57 s | 6.56 s |
+
+  The VAD hears only the first ~0.35 s of the "ummm" (confidence 0.82 to 0.98 until 3.04 s, then 0.43 and falling although the sound runs to 3.84 s). It is a separate segment because the dip before it (0.39 s) is longer than `stop_secs` (0.2 s). Live, run 2 showed no VAD event for the "ummm" at all. One non-speech chunk in the starting state resets the start (`VADAnalyzer._run_analyzer`), so a 0.35 s sound only just over the 0.7 threshold can miss live (browser noise suppression, echo cancellation and Opus all change the audio; not confirmed). So this "ummm" is detected offline and missed live: unreliable.
 
   | Run | VAD stop to turn close | Turn close to `TOOL started` | `TOOL started` to correction `VAD` start | Notes |
   |---|---|---|---|---|
   | 1 | n/a | 0.81 s | 0.70 s | VAD did not fire for the first sentence. The turn started from the transcript (`Transcription`) and closed 2.4 s later, so `TURN_FAST_TIMEOUT` was not what closed it |
   | 2 | 0.20 s | 1.06 s | 2.24 s | VAD fired normally. The turn closed exactly `TURN_FAST_TIMEOUT` after the VAD stop |
 
-- **Finding from runs 1 and 2: the S0 pause must be longer than 1 s.** The turn closes 0.2 s after the VAD stop, then the LLM takes 0.8 to 1.06 s to emit the tool call. The correction must start after both, so at least about 1.3 s after `VAD user stopped speaking` (about 1.5 s after the caller stops, since VAD reports the stop 0.2 s late). With the brief's 1 s pause the correction starts while the LLM is still generating (S1) and no Friday call happens. Fix the recording, not the VAD. Use `vad_file.py` to see why the VAD skips the "ummm" (low confidence for a hummed sound, or low volume), then re-record or edit it (a more spoken "uhhh" is likely to score higher). Then the silence the bot hears should be about 1.6 s. Check it on the timeline: `VAD user stopped speaking` to the correction's `VAD user started speaking`, minus 0.2 s. A pause of about 2 s is the target, so lengthen the file's pause a little if the 1.6 s run misses. `smart` still holds the turn open then: its silence fallback is 3 s (`SmartTurnParams.stop_secs`).
+- **Finding from runs 1 and 2: the S0 recording needs two changes, and the second matters for `smart`.**
+  1. The pause after the caller stops must be about 2 s as the VAD sees it. The turn closes 0.2 s after the VAD stop, then the LLM takes 0.8 to 1.06 s to emit the tool call, so the correction must start at least about 1.3 s after `VAD user stopped speaking`. With 1 s the correction starts while the LLM is still generating (S1) and no Friday call happens. In this file the VAD-visible silence is 2.2 s after the "ummm" (3.20 to 5.41 s) and 3.1 s after "Friday" (2.30 to 5.41 s).
+  2. There must be no VAD-visible gap between "Friday" and "ummm". The 0.39 s dip splits them, so the VAD stops after "Book me for Friday", which is a complete sentence. `smart` analyzes the audio at every VAD stop, so it can close the turn right there, before "ummm" starts, and then `fast` and `smart` look the same. Close the dip to under 0.2 s so the VAD sees one segment ending in the "ummm":
+     ```
+     ffmpeg -i "Recorder - 20261119-0946(1).m4a" -filter_complex "[0:a]atrim=0:2.34,asetpts=PTS-STARTPTS[a];[0:a]atrim=2.66,asetpts=PTS-STARTPTS[b];[a][b]concat=n=2:v=0:a=1" s0.m4a
+     ```
+     This removes 0.31 s of the dip and keeps the rest. Check the result with `vad_file.py`: there should be no `QUIET` state between "Friday" and "ummm", and about 2 s of silence before the last segment.
+  Do not change VAD parameters. Read the final pause off the timeline: `VAD user stopped speaking` to the correction's `VAD user started speaking`, minus 0.2 s.

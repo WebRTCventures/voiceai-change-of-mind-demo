@@ -9,7 +9,7 @@ Turn detection cannot prevent the S2 race. It only changes how often it happens.
 - A short silence timeout (`fast`) closes the turn during the pause. The LLM sees "Book me for Friday", calls the tool, and the correction arrives while the tool runs (S2). That is the failure the other specs handle.
 - A model that listens to the audio (`smart`) can hear that the sentence is unfinished and keep the turn open. The correction then joins the same turn, the LLM sees one message, and a single `book_appointment(Saturday)` runs.
 
-Smart Turn does not remove the race. It makes the race rarer for this kind of speech. A caller who says a complete "Book me for Friday." and changes their mind 2 s later still hits S2 in either mode.
+Smart Turn analyzes the audio each time the VAD reports a stop, so it only helps when the caller's trailing-off sound is part of the same VAD segment as the sentence. A gap longer than `stop_secs` (0.2 s) between "Friday" and "ummm" lets the model see "Book me for Friday" alone, which it can reasonably call complete. The S0 recording has to keep that gap under 0.2 s. Smart Turn does not remove the race. It makes the race rarer for this kind of speech. A caller who says a complete "Book me for Friday." and changes their mind 2 s later still hits S2 in either mode.
 
 ## Verified against Pipecat 1.16.0
 
