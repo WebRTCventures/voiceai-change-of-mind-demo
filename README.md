@@ -7,7 +7,7 @@ Companion demo for a post about turn detection, barge-in and tool calling. A cal
 ```
 cp .env.example .env     # add DEEPGRAM_API_KEY and OPENAI_API_KEY
 uv sync
-uv run bot.py [--policy deaf|cancel|safe] [--turn smart|fast]
+uv run bot.py [--policy deaf|cancel|safe|llm-cancel] [--turn smart|fast]
 ```
 
 Open http://localhost:7860/client. The terminal prints a timeline, and a dump when you disconnect.
@@ -16,8 +16,15 @@ Open http://localhost:7860/client. The terminal prints a timeline, and a dump wh
 
 | Flag | Values | What it changes |
 |---|---|---|
-| `--policy` | `deaf`, `cancel` (default), `safe` | What happens when the caller speaks while the booking tool runs |
+| `--policy` | `deaf`, `cancel` (default), `safe`, `llm-cancel` | What happens when the caller speaks while the booking tool runs |
 | `--turn` | `smart` (default), `fast` | What decides that the caller has finished talking |
+
+### `--policy`
+
+- `deaf`: the caller is muted while the tool runs, so the correction is never heard.
+- `cancel`: Pipecat's default. The interruption cancels the tool call, but the backend write still lands.
+- `safe`: like `cancel`, and the backend keeps one booking per caller (upsert with a turn-number guard).
+- `llm-cancel`: the model decides. The tool call keeps running through the interruption, and Pipecat gives the model a `cancel_book_appointment` tool. Storage as `safe`. The outcome depends on the model, so it can differ from run to run.
 
 ### `--turn`
 

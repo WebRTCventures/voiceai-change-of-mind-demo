@@ -2,7 +2,9 @@
 
 Turn, mute and assistant-turn events come from the context aggregators. A small
 observer (this class) adds what they do not carry: VAD, interruption, bot
-speaking and function call frames. States S2 and S4 are from the demo brief.
+speaking and function call frames, including the model calling Pipecat's
+cancel_<tool> tool and an async result that arrives after the caller spoke
+(llm-cancel). States S2 and S4 are from the demo brief.
 """
 
 import json
@@ -13,6 +15,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
     InterruptionFrame,
@@ -21,7 +24,9 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.observers.base_observer import BaseObserver
+from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.utils.async_tool_cancellation import CANCEL_TOOL_PREFIX
 
 
 _FLUSHES = (
@@ -47,9 +52,13 @@ class Timeline(BaseObserver):
         self.speech_start = None  # when the current user speech began
         self.bot_speaking = False  # S4
         self.running = {}  # tool_call_id -> (name, seq); non-empty means S2
+        self.async_ids = set()  # running calls with cancel_on_interruption=False (llm-cancel)
         self.cancelled_seqs = set()
-        self.last_day = None  # day of the last book_appointment call the model made
+        self.cancelled_ids = set()
+        self.calls = []  # (tool_call_id, day) of every book_appointment call the model made
+        self.model_cancelling = False  # the model's cancel_<tool> call is running
         self.pending = None  # INTERRUPT line waiting for its latency numbers
+        self.kept = []  # async calls the pending interruption left running
         self.muted = False  # user mute is on (deaf policy)
 
     def now(self) -> float:
@@ -115,7 +124,10 @@ class Timeline(BaseObserver):
             self.log("VAD", "user stopped speaking")
         elif isinstance(f, InterruptionFrame):
             self._flush()
-            waits = {"tool_cancel_latency": bool(self.running), "yield_latency": self.bot_speaking}
+            # An interruption cancels only sync calls. Async ones (llm-cancel) keep running.
+            sync = any(i not in self.async_ids for i in self.running)
+            self.kept = [f"{n} seq={s}" for i, (n, s) in self.running.items() if i in self.async_ids]
+            waits = {"tool_cancel_latency": sync, "yield_latency": self.bot_speaking}
             self.pending = {k: None for k, on in waits.items() if on}
             if not self.pending:
                 self._flush()
@@ -130,17 +142,43 @@ class Timeline(BaseObserver):
             for c in f.function_calls:
                 self.running[c.tool_call_id] = (c.function_name, self.turns)
                 if c.function_name == "book_appointment":
-                    self.last_day = c.arguments.get("day")
+                    self.calls.append((c.tool_call_id, c.arguments.get("day")))
                 args = ", ".join(f"{k}={v}" for k, v in c.arguments.items())
                 self.log("TOOL", f"{c.function_name}({args}) started  seq={self.turns}")
+        elif isinstance(f, FunctionCallInProgressFrame):
+            if f.function_name.startswith(CANCEL_TOOL_PREFIX):
+                # Pipecat leaves its built-in cancel tool out of FunctionCallsStartedFrame,
+                # so this frame is the first sign that the model called it.
+                self._flush()
+                self.model_cancelling = True
+                args = ", ".join(f"{k}={v}" for k, v in f.arguments.items())
+                self.log("TOOL", f"model called {f.function_name}({args})")
+            elif not f.cancel_on_interruption:
+                self.async_ids.add(f.tool_call_id)
         elif isinstance(f, FunctionCallCancelFrame):
             name, seq = self.running.pop(f.tool_call_id, (f.function_name, "?"))
             self.cancelled_seqs.add(seq)
+            self.cancelled_ids.add(f.tool_call_id)
             self._resolve("tool_cancel_latency")
-            self.log("TOOL", f"{name} seq={seq} CANCELLED")
+            by = " by the model" if self.model_cancelling else ""
+            self.log("TOOL", f"{name} seq={seq} CANCELLED{by}")
         elif isinstance(f, FunctionCallResultFrame):
+            if f.function_name.startswith(CANCEL_TOOL_PREFIX):
+                self.model_cancelling = False
+                r = f.result if isinstance(f.result, dict) else {}
+                # A refusal's reason lists the running calls after a colon; the dump has it in full.
+                why = str(r.get("reason", f.result)).split(":")[0]
+                done = f"cancelled {r['cancelled']}" if r.get("cancelled") else f"refused: {why}"
+                self.log("TOOL", f"{f.function_name} {done}")
+                return
             name, seq = self.running.pop(f.tool_call_id, (f.function_name, "?"))
-            self.log("TOOL", f"{name} seq={seq} result {json.dumps(f.result)}")
+            # Pipecat's rule for an async call: if a user message came after the call
+            # started, the result goes in as a new developer message instead of
+            # replacing the tool placeholder. A stopped user turn is that user message.
+            late = ""
+            if f.tool_call_id in self.async_ids and seq != "?" and self.turns > seq:
+                late = "  LATE: caller spoke since, injected as a developer message"
+            self.log("TOOL", f"{name} seq={seq} result {json.dumps(f.result)}{late}")
 
     def _resolve(self, key: str):
         """Fill in one latency (ms since user speech start); print once all are known."""
@@ -155,7 +193,10 @@ class Timeline(BaseObserver):
         if self.pending is None:
             return
         nums = "".join(f"  {k}={v or 'n/a'}" for k, v in self.pending.items())
+        if self.kept:
+            nums += f"  ({', '.join(self.kept)} keeps running)"
         self.pending = None
+        self.kept = []
         self.log("INTERRUPT", f"interruption{nums}")
 
     # --- end of session ---------------------------------------------------------
@@ -172,12 +213,29 @@ class Timeline(BaseObserver):
                 for c in m.get("tool_calls", [])
             )
             tool_id = f"id={m['tool_call_id']} " if m["role"] == "tool" else ""
-            print(f"  {m['role']:<9} {tool_id}{calls or m.get('content')}")
+            print(f"  {m['role']:<9} {tool_id}{calls or _short(m)}")
+        # What the model last asked for and did not cancel. The cancelled call's
+        # write is shielded and can still land, so a cancel does not empty the calendar.
+        wanted = [day for i, day in self.calls if i not in self.cancelled_ids]
         days = [r["day"] for r in rows]
-        if len(days) == 1 and days[0].lower() == str(self.last_day).lower():
+        if not wanted and self.calls:
+            ok = not days
+            n = f"{len(days)} booking{'s' * (len(days) != 1)}"
+            print(f"{'OK' if ok else 'MISMATCH'}: {n} ({', '.join(days) or 'none'}), "
+                  "the model cancelled every booking call")
+        elif len(days) == 1 and days[0].lower() == str(wanted[-1] if wanted else None).lower():
             # The verdict only knows what the model asked for. In deaf mode the
             # caller's correction never reached the model, so OK proves nothing.
             note = "  <- expected for deaf: the correction was muted" if policy == "deaf" else ""
             print(f"OK: 1 booking, {days[0]}{note}")
         else:
             print(f"MISMATCH: {len(days)} bookings ({', '.join(days) or 'none'})")
+
+
+def _short(m: dict) -> str:
+    """Message content for the dump. Async-tool messages drop their long description."""
+    p = async_tool_messages.parse_message(m)
+    if p is None:
+        return str(m.get("content"))
+    who = "" if m["role"] == "tool" else f" id={p.tool_call_id}"  # tool lines print the id already
+    return f"async_tool {p.status}{who}" + (f" {p.result}" if p.result else "")
